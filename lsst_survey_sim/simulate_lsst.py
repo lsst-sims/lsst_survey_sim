@@ -102,6 +102,19 @@ def fetch_previous_visits(
 def get_scheduler_with_kwargs(
     config_script_path: str, scheduler_kwargs: dict[str, Any]
 ) -> tuple[CoreScheduler, int]:
+    """Set up the survey scheduler, passing kwargs.
+
+    Parameters
+    ----------
+    config_script_path
+        The path to the scheduler configuration file.
+    scheduler_kwargs
+        Dictionary of kwargs to pass to the scheduler 'get_scheduler' call.
+
+    Returns
+    -------
+    nside, scheduler : `int`, `CoreScheduler`
+    """
     module_name = "scheduler_config"
     config_module_spec = importlib.util.spec_from_file_location(module_name, config_script_path)
     if config_module_spec is None or config_module_spec.loader is None:
@@ -138,6 +151,8 @@ def setup_scheduler(
     ----------
     config_script_path
         The path to the scheduler configuration file.
+    scheduler_kwargs
+        Dictionary of kwargs to pass to the scheduler 'get_scheduler' call.
     day_obs
         The day_obs (integer) of the day on which to start the simulation.
         Will fetch all visits *up to* this day_obs.
@@ -169,7 +184,7 @@ def setup_scheduler(
         # Set up the scheduler from the config file from ts_config_ocs.
         nside, scheduler = get_scheduler_from_config(config_script_path)
     else:
-        get_scheduler_with_kwargs(config_script_path, scheduler_kwargs)
+        nside, scheduler = get_scheduler_with_kwargs(config_script_path, scheduler_kwargs)
     if initial_opsim is None:
         if opsim_filename is None:
             if day_obs is None:
