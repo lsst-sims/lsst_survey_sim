@@ -43,8 +43,8 @@ dev = [
 ]
 
 [project.scripts]
-fetch_sv_visits = "lsst_survey_sim.simulate_lsst:fetch_lsst_visits_cli"
-make_sv_scheduler = "lsst_survey_sim.simulate_lsst:make_lsst_scheduler_cli"
+fetch_lsst_visits = "lsst_survey_sim.simulate_lsst:fetch_lsst_visits_cli"
+make_lsst_scheduler = "lsst_survey_sim.simulate_lsst:make_lsst_scheduler_cli"
 make_model_observatory = "lsst_survey_sim.simulate_lsst:make_model_observatory_cli"
 make_band_scheduler = "lsst_survey_sim.simulate_lsst:make_band_scheduler_cli"
 run_lsst_sim = "lsst_survey_sim.simulate_lsst:run_lsst_sim_cli"

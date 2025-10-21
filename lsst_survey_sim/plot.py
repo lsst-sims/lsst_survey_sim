@@ -1,6 +1,6 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import skyproj
-import matplotlib.pyplot as plt
 from rubin_scheduler.scheduler.utils import get_current_footprint
 
 __all__ = ("get_background", "make_plot")

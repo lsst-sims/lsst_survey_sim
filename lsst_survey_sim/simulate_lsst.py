@@ -1,7 +1,10 @@
 import argparse
+import importlib.util
 import logging
 import pickle
 import sqlite3
+import sys
+import types
 import warnings
 from typing import Any
 
@@ -96,8 +99,32 @@ def fetch_previous_visits(
     return visits
 
 
+def get_scheduler_with_kwargs(
+    config_script_path: str, scheduler_kwargs: dict[str, Any]
+) -> tuple[CoreScheduler, int]:
+    module_name = "scheduler_config"
+    config_module_spec = importlib.util.spec_from_file_location(module_name, config_script_path)
+    if config_module_spec is None or config_module_spec.loader is None:
+        # Make type checking happy
+        raise ValueError(f"Cannot load config file {config_script_path}")
+
+    config_module: types.ModuleType = importlib.util.module_from_spec(config_module_spec)
+    sys.modules[module_name] = config_module
+    config_module_spec.loader.exec_module(config_module)
+
+    # Load the scheduler with kwargs
+    # If kwargs do not match expected, this will raise TypeError.
+    nside, scheduler = config_module.get_scheduler(**scheduler_kwargs)
+
+    assert isinstance(nside, int)
+    assert isinstance(scheduler, CoreScheduler)
+
+    return nside, scheduler
+
+
 def setup_scheduler(
     config_script_path: str,
+    scheduler_kwargs: dict[str, Any] | None = None,
     day_obs: int | None = None,
     initial_opsim: pd.DataFrame | None = None,
     opsim_filename: str | None = None,
@@ -138,8 +165,11 @@ def setup_scheduler(
     initial_opsim : `pd.DataFrame`
     nside : `int`
     """
-    # Set up the scheduler from the config file from ts_config_ocs.
-    nside, scheduler = get_scheduler_from_config(config_script_path)
+    if scheduler_kwargs is None:
+        # Set up the scheduler from the config file from ts_config_ocs.
+        nside, scheduler = get_scheduler_from_config(config_script_path)
+    else:
+        get_scheduler_with_kwargs(config_script_path, scheduler_kwargs)
     if initial_opsim is None:
         if opsim_filename is None:
             if day_obs is None:
@@ -155,7 +185,6 @@ def setup_scheduler(
     if initial_opsim is not None and len(initial_opsim) > 0:
         sch_obs = SchemaConverter().opsimdf2obs(initial_opsim)
         scheduler.add_observations_array(sch_obs)
-
     return scheduler, initial_opsim, nside
 
 
