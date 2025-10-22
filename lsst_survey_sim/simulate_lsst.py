@@ -694,7 +694,10 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     if keep_rewards:
         scheduler.keep_rewards = keep_rewards
 
-    survey_info = lsst_support.survey_times(verbose=True, add_downtime=False, nside=nside)
+    survey_info = lsst_support.survey_times(
+        add_downtime=False,
+        day_obs=day_obs
+        )
 
     LOGGER.info("Starting simulation")
     observations, scheduler, observatory, rewards, obs_rewards, survey_info = run_sim(
