@@ -211,8 +211,8 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
     # #  /pages/702939386/Filter+Swap+planning (confluence).
     # See also slack, #cam-filter-exchange
     upcoming_schedule = {
-        "2025-10-19": ["g", "r"],
-        "2025-10-22": ["u", "g", "r", "i", "z"],
+        "2025-10-22": ["g", "r", "i", "z"],
+        "2025-10-25": ["u", "g", "r", "i", "z"],
         "2025-10-29": ["g", "r", "i", "z", "y"],
         "2025-11-13": ["u", "g", "r", "i", "z"],
         "2025-11-27": ["g", "r", "i", "z", "y"],
