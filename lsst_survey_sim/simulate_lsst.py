@@ -21,7 +21,7 @@ from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
 from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter
 from rubin_scheduler.utils import DEFAULT_NSIDE, Site
-from rubin_sim.sim_archive import make_sim_archive_dir, transfer_archive_dir
+from rubin_sim.sim_archive import make_sim_data_dir
 from rubin_sim.sim_archive.make_snapshot import get_scheduler_from_config
 from rubin_sim.sim_archive.prenight import AnomalousOverheadFunc
 
@@ -542,6 +542,9 @@ def fetch_lsst_visits_cli(cli_args: list = []) -> int:
     site = args.site
 
     visits = fetch_previous_visits(day_obs, token_file, site=site)
+    if visits is None:
+        # Make an empty pd.DataFrame with opsim column names and types.
+        visits = SchemaConverter().obs2opsim(ObservationArray()[0:0])
 
     with sqlite3.connect(file_name) as connection:
         visits.to_sql("observations", connection, index=False)
@@ -644,11 +647,6 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
         "--archive", type=str, default="", help="URI of the archive in which to store the results"
     )
     parser.add_argument("--telescope", type=str, default="simonyi", help="The telescope simulated.")
-    parser.add_argument(
-        "--capture_env",
-        action="store_true",
-        help="Record the current environment as the simulation environment.",
-    )
     parser.add_argument("--label", type=str, default="", help="The tags on the simulation.")
     parser.add_argument("--delay", type=float, default=0.0, help="Minutes after nominal to start.")
     parser.add_argument("--anom_overhead_scale", type=float, default=0.0, help="scale of scatter in the slew")
@@ -683,7 +681,6 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     keep_rewards = args.keep_rewards
     tags = args.tags
     label = args.label
-    capture_env = args.capture_env
     telescope = args.telescope
     delay = args.delay
     anom_overhead_scale = args.anom_overhead_scale
@@ -714,20 +711,16 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     LOGGER.info("Simulation complete.")
 
     if len(archive_uri) > 0:
-        data_path = make_sim_archive_dir(
+        data_path = make_sim_data_dir(
             observations,
             rewards if keep_rewards else None,
             obs_rewards if keep_rewards else None,
             in_files={"scheduler": args.scheduler, "observatory": args.observatory},
             tags=tags,
             label=label,
-            capture_env=capture_env,
             opsim_metadata={"telescope": telescope},
         )
         LOGGER.info(f"Created simulation archived directory: {data_path.name}")
-
-        sim_archive_uri = transfer_archive_dir(data_path.name, archive_uri)
-        LOGGER.info(f"Transferred {data_path} to {sim_archive_uri}")
 
     else:
         _ = consolidate_and_save(observatory, observations, initial_opsim, run_name + ".db")
