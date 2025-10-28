@@ -21,7 +21,11 @@ from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
 from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter
 from rubin_scheduler.utils import DEFAULT_NSIDE, Site
-from rubin_sim.sim_archive import make_sim_data_dir
+
+try:
+    from rubin_sim.sim_archive import make_sim_data_dir
+except ImportError:
+    pass
 from rubin_sim.sim_archive.make_snapshot import get_scheduler_from_config
 from rubin_sim.sim_archive.prenight import AnomalousOverheadFunc
 
@@ -55,7 +59,7 @@ def fetch_previous_visits(
     ----------
     day_obs
         The day_obs (integer) of the day on which to start the simulation.
-        Will fetch all SV visits *up to* this day_obs.
+        Will fetch all science visits *up to* this day_obs.
     tokenfile
         Path to the RSP tokenfile.
         See also `rubin_nights.connections.get_access_token`.
@@ -84,16 +88,23 @@ def fetch_previous_visits(
         f"left join cdb_{instrument}.visit1_quicklook as q "
         f"on v.visit_id = q.visit_id "
         f"where v.day_obs < {day_obs} "
-        f"and v.science_program = 'BLOCK-407' "
+        f"and v.science_program = 'BLOCK-407' or v.science_program = 'BLOCK-408'"
     )
     visits = consdb.query(query)
     if len(visits) > 0:
-        # augment visits adds many additional columns
+        # Augment visits adds some additional columns.
         visits = augment_visits.augment_visits(visits, instrument)
+        # Remove known bad visits.
+        bad_visit_ids = augment_visits.fetch_excluded_visits("lsstcam")
+        visits = augment_visits.exclude_visits(visits, bad_visit_ids)
+        # Replace Nans in measured seeing if any remain.
+        fill_value = 3.0
+        fwhm = np.where(np.isnan(visits.fwhm_eff.values), fill_value, visits.fwhm_eff.values)
+        visits.loc[:, "fwhm_eff"] = fwhm
         if convert_to_opsim:
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
-            visits["note"] = visits["scheduler_note"].copy()
+            visits.loc[:, "note"] = visits.loc[:, "scheduler_note"].copy()
     else:
         visits = None
     return visits
@@ -211,9 +222,9 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
     # #  /pages/702939386/Filter+Swap+planning (confluence).
     # See also slack, #cam-filter-exchange
     upcoming_schedule = {
-        "2025-10-19": ["g", "r"],
-        "2025-10-22": ["u", "g", "r", "i", "z"],
-        "2025-10-29": ["g", "r", "i", "z", "y"],
+        "2025-10-22": ["g", "r", "i", "z"],
+        "2025-10-25": ["u", "g", "r", "i", "z"],
+        "2025-10-28": ["g", "r", "i", "z", "y"],
         "2025-11-13": ["u", "g", "r", "i", "z"],
         "2025-11-27": ["g", "r", "i", "z", "y"],
         "2025-12-10": ["u", "g", "r", "i", "z"],
@@ -674,7 +685,6 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     day_obs = args.day_obs
     sim_nights = args.sim_nights
     run_name = args.run_name
-    nside = observatory.nside
     results_dir = args.results
     keep_rewards = args.keep_rewards
     tags = args.tags

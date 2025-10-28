@@ -1,12 +1,16 @@
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import numpy as np
+import numpy.typing as npt
 import skyproj
 from rubin_scheduler.scheduler.utils import get_current_footprint
+from rubin_sim.maf import MetricBundle
 
 __all__ = ("get_background", "make_plot")
 
 
-def get_background(nside=64):
+def get_background(nside: int = 64) -> npt.NDArray:
     fp, labels = get_current_footprint(nside=nside)
     bg_fp = np.where(fp["r"] == 0, np.nan, fp["r"])
     bg_fp = np.where(bg_fp > 1, 1, bg_fp)
@@ -14,8 +18,15 @@ def get_background(nside=64):
 
 
 def make_plot(
-    metric_bundle, proj="laea", vmin=None, vmax=None, ax=None, background=None, title=None, label_dec=True
-):
+    metric_bundle: MetricBundle,
+    proj: str = "laea",
+    vmin: float | None = None,
+    vmax: float | None = None,
+    ax: Axes | None = None,
+    background: npt.NDArray | None = None,
+    title: str | None = None,
+    label_dec: bool = True,
+) -> Figure:
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 7))
     else:

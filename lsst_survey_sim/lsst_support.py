@@ -67,7 +67,7 @@ def survey_footprint(
 
 def survey_times(
     random_seed: int = 55,
-    early_dome_closure: float = 2.0,
+    early_dome_closure: float = 1.0,
     add_downtime: bool = True,
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
@@ -91,10 +91,10 @@ def survey_times(
         Print information about start/end times and downtime fraction.
     random_seed
         Random value to seed downtimes with
-    early_dome_close
+    early_dome_closure
         Close the dome (start downtime) `early_dome_closure` hours before
-        0-degree sunrise. A closure 2 hours before sunrise aligns with
-        current operational guidelines.
+        0-degree sunrise. A closure 1 hours before sunrise aligns with
+        current operational guidelines (-18 degree twilight). In hours.
     add_downtime
         If False, do not add unscheduled downtime - this still adds early
         dome closure from day_obs to downtime_ndays.
@@ -188,10 +188,10 @@ def survey_times(
 
         # Placeholder if we want to put in known likely upcoming weather
         # problems for simulations (or nights off for tests)
-        weather_starts = [
+        weather_starts: list[Time] = [
             # Time("2025-08-29T12:00:00", scale="utc"),
         ]
-        weather_ends = [
+        weather_ends: list[Time] = [
             # Time("2025-09-01T12:00:00", scale="utc"),
         ]
 
