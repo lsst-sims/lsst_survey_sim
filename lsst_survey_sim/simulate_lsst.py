@@ -643,9 +643,6 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     parser.add_argument("sim_nights", type=int, help="number of nights to run.")
     parser.add_argument("run_name", type=str, help="Run (also db output) name.")
     parser.add_argument("--keep_rewards", action="store_true", help="Compute rewards data.")
-    parser.add_argument(
-        "--archive", type=str, default="", help="URI of the archive in which to store the results"
-    )
     parser.add_argument("--telescope", type=str, default="simonyi", help="The telescope simulated.")
     parser.add_argument("--label", type=str, default="", help="The tags on the simulation.")
     parser.add_argument("--delay", type=float, default=0.0, help="Minutes after nominal to start.")
@@ -657,6 +654,7 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
         help="random number seed for anomalous scatter in overhead",
     )
     parser.add_argument("--tags", type=str, default=[], nargs="*", help="The tags on the simulation.")
+    parser.add_argument("--results", type=str, default='', help="Results directory.")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
     with open(args.scheduler, "rb") as sched_io:
@@ -677,7 +675,7 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     sim_nights = args.sim_nights
     run_name = args.run_name
     nside = observatory.nside
-    archive_uri = args.archive
+    results_dir = args.results
     keep_rewards = args.keep_rewards
     tags = args.tags
     label = args.label
@@ -694,7 +692,10 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     if keep_rewards:
         scheduler.keep_rewards = keep_rewards
 
-    survey_info = lsst_support.survey_times(verbose=True, add_downtime=False, nside=nside)
+    survey_info = lsst_support.survey_times(
+        add_downtime=False,
+        day_obs=day_obs
+        )
 
     LOGGER.info("Starting simulation")
     observations, scheduler, observatory, rewards, obs_rewards, survey_info = run_sim(
@@ -710,7 +711,7 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     )
     LOGGER.info("Simulation complete.")
 
-    if len(archive_uri) > 0:
+    if len(results_dir) > 0:
         data_path = make_sim_data_dir(
             observations,
             rewards if keep_rewards else None,
@@ -719,8 +720,9 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
             tags=tags,
             label=label,
             opsim_metadata={"telescope": telescope},
+            data_path=results_dir,
         )
-        LOGGER.info(f"Created simulation archived directory: {data_path.name}")
+        LOGGER.info(f"Wrote results to directory: {data_path.name}")
 
     else:
         _ = consolidate_and_save(observatory, observations, initial_opsim, run_name + ".db")
