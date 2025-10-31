@@ -7,6 +7,7 @@ import warnings
 from typing import Any
 
 import astropy.units as u
+import git
 import numpy as np
 import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
@@ -35,6 +36,7 @@ CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_blo
 LOGGER = logging.getLogger(__name__)
 
 __all__ = [
+    "get_configuration",
     "fetch_previous_visits",
     "setup_scheduler",
     "setup_band_scheduler",
@@ -47,6 +49,36 @@ __all__ = [
     "make_band_scheduler_cli",
     "run_lsst_sim_cli",
 ]
+
+
+def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
+    """Git checkout ts_config_scheduler and set it to the desired commit.
+
+    `ts_config_scheduler_commit` is fetchable from
+    `lsst.sal.Scheduler.logevent_configurationApplied`
+    or use tip of the run branch, fetchable from `lsst.obsenv.run_branch`.
+
+    Parameters
+    ----------
+    ts_config_scheduler_commit : `str`
+        Git branch .. could be a hash?
+    clone_path : `str` or None
+        The location to clone the repo.
+        Join with the remainder of the path to the configuration scripts.
+    """
+    repo_url = "https://github.com/lsst-ts/ts_config_scheduler"
+
+    # Perform a shallow clone with a depth of 1
+    try:
+        repo = git.Repo.clone_from(repo_url, clone_path)
+        LOGGER.info(f"ts_config_scheduler repository cloned to: {clone_path} with depth 1")
+    except git.GitCommandError:
+        repo = git.Repo(clone_path)
+        LOGGER.error(f"Directory {clone_path} already exists. Let's assume it's the repo.")
+    # Check out the commit
+    repo.git.checkout(ts_config_scheduler_commit)
+    LOGGER.info(f"Checked out commit {ts_config_scheduler_commit} in {clone_path}.")
+    return
 
 
 def fetch_previous_visits(
@@ -104,6 +136,7 @@ def fetch_previous_visits(
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
             visits.loc[:, "note"] = visits.loc[:, "scheduler_note"].copy()
+        LOGGER.info(f"Fetched {len(visits)} good visits.")
     else:
         visits = None
     return visits

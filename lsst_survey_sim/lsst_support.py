@@ -67,7 +67,7 @@ def survey_footprint(
 
 def survey_times(
     random_seed: int = 55,
-    early_dome_closure: float = 1.0,
+    early_dome_closure: float = 1.5,
     add_downtime: bool = True,
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
