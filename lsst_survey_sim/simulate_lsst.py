@@ -1,10 +1,8 @@
 import argparse
-import importlib.util
 import logging
 import pickle
 import sqlite3
-import sys
-import types
+import subprocess
 import warnings
 from typing import Any
 
@@ -31,7 +29,8 @@ from rubin_sim.sim_archive.prenight import AnomalousOverheadFunc
 
 from . import lsst_support
 
-CONFIG_SCRIPT_PATH = "fbs_config_lsst_survey.py"
+CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_407.py"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -110,45 +109,9 @@ def fetch_previous_visits(
     return visits
 
 
-def get_scheduler_with_kwargs(
-    config_script_path: str, scheduler_kwargs: dict[str, Any]
-) -> tuple[CoreScheduler, int]:
-    """Set up the survey scheduler, passing kwargs.
-
-    Parameters
-    ----------
-    config_script_path
-        The path to the scheduler configuration file.
-    scheduler_kwargs
-        Dictionary of kwargs to pass to the scheduler 'get_scheduler' call.
-
-    Returns
-    -------
-    nside, scheduler : `int`, `CoreScheduler`
-    """
-    module_name = "scheduler_config"
-    config_module_spec = importlib.util.spec_from_file_location(module_name, config_script_path)
-    if config_module_spec is None or config_module_spec.loader is None:
-        # Make type checking happy
-        raise ValueError(f"Cannot load config file {config_script_path}")
-
-    config_module: types.ModuleType = importlib.util.module_from_spec(config_module_spec)
-    sys.modules[module_name] = config_module
-    config_module_spec.loader.exec_module(config_module)
-
-    # Load the scheduler with kwargs
-    # If kwargs do not match expected, this will raise TypeError.
-    nside, scheduler = config_module.get_scheduler(**scheduler_kwargs)
-
-    assert isinstance(nside, int)
-    assert isinstance(scheduler, CoreScheduler)
-
-    return nside, scheduler
-
-
 def setup_scheduler(
     config_script_path: str,
-    scheduler_kwargs: dict[str, Any] | None = None,
+    config_ddf_script_path: str | None = None,
     day_obs: int | None = None,
     initial_opsim: pd.DataFrame | None = None,
     opsim_filename: str | None = None,
@@ -162,8 +125,11 @@ def setup_scheduler(
     ----------
     config_script_path
         The path to the scheduler configuration file.
-    scheduler_kwargs
-        Dictionary of kwargs to pass to the scheduler 'get_scheduler' call.
+    config_ddf_script_path
+        The path to the associated DDF configuration file.
+        If provided, this script will be run in order to generate the
+        pre-generated DDF observations. If the pre-gen array already
+        exists, the current lsst_ddf_gen scripts exit quickly.
     day_obs
         The day_obs (integer) of the day on which to start the simulation.
         Will fetch all visits *up to* this day_obs.
@@ -191,11 +157,16 @@ def setup_scheduler(
     initial_opsim : `pd.DataFrame`
     nside : `int`
     """
-    if scheduler_kwargs is None:
-        # Set up the scheduler from the config file from ts_config_ocs.
-        nside, scheduler = get_scheduler_from_config(config_script_path)
-    else:
-        nside, scheduler = get_scheduler_with_kwargs(config_script_path, scheduler_kwargs)
+    # Run the ddf config
+    if config_ddf_script_path is not None:
+        # Run the DDF configuration
+        result = subprocess.run(config_ddf_script_path, capture_output=True)
+        LOGGER.info(result.stdout)
+        LOGGER.error(result.stderr)
+
+    # Set up the scheduler from the config file from ts_config_ocs.
+    nside, scheduler = get_scheduler_from_config(config_script_path)
+    # Add previous observations.
     if initial_opsim is None:
         if opsim_filename is None:
             if day_obs is None:
@@ -436,42 +407,6 @@ def run_sim(
     return sim_observations, scheduler, observatory, rewards, obs_rewards, survey_info
 
 
-def consolidate_and_save(
-    observatory: ModelObservatory,
-    sim_observations: ObservationArray = ObservationArray(n=0),
-    initial_opsim: pd.DataFrame | None = None,
-    filename: str | None = None,
-) -> pd.DataFrame:
-    """Join sim_observations and initial_opsim, remove known bad visits,
-    and save to opsim database as directed.
-
-    Parameters
-    ----------
-    observatory
-        The model observatory. Config of the model observatory config is
-        saved as part of the opsim database.
-    sim_observations
-        The simulated observations, as an ObservationArray.
-    initial_opsim
-        The initial opsim visits, in opsim format.
-    filename
-        The filename to save to, if provided.
-
-    Returns
-    -------
-    visits : `pd.DataFrame`
-        Real and simulated visits, in one dataframe (opsim format).
-    """
-    # Remove known bad visits from initial_opsim before distribution
-    bad_visit_ids = augment_visits.fetch_excluded_visits("lsstcam")  # noqa F841
-    if initial_opsim is not None:
-        gvisits = initial_opsim.query("observation_id not in @bad_visit_ids")
-    else:
-        gvisits = None
-    visits = lsst_support.save_opsim(observatory, sim_observations, gvisits, filename)
-    return visits
-
-
 def simple_sim(
     day_obs: int,
     sim_nights: int,
@@ -505,6 +440,7 @@ def simple_sim(
     )
     scheduler, initial_opsim, nside = setup_scheduler(
         config_script_path=CONFIG_SCRIPT_PATH,
+        config_ddf_script_path=CONFIG_DDF_SCRIPT_PATH,
         day_obs=day_obs,
         initial_opsim=initial_opsim,
     )
@@ -532,7 +468,7 @@ def simple_sim(
     )
 
     filename = f"lsst_{day_obs}_{sim_nights}.db"
-    visits = consolidate_and_save(observatory, sim_observations, initial_opsim, filename)
+    visits = lsst_support.save_opsim(observatory, sim_observations, initial_opsim, filename)
 
     return visits, survey_info
 
@@ -568,18 +504,28 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
     parser.add_argument("--opsim", type=str, default="", help="Name of opsim visits file to load.")
     parser.add_argument(
-        "--config-script",
+        "--config_script",
         type=str,
         default=CONFIG_SCRIPT_PATH,
         help="Path to the config script for the scheduler.",
+    )
+    parser.add_argument(
+        "--config_ddf_script",
+        type=str,
+        default=CONFIG_DDF_SCRIPT_PATH,
+        help="Path to the config script for the DDF observations for this scheduler config.",
     )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
     opsim_fname = args.opsim
     scheduler_fname = args.file_name
     scheduler_config_script = args.config_script
+    scheduler_ddf_config_script = args.config_ddf_script
 
     scheduler, initial_opsim, nside = setup_scheduler(
-        scheduler_config_script, day_obs=None, opsim_filename=opsim_fname
+        config_script_path=scheduler_config_script,
+        config_ddf_script_path=scheduler_ddf_config_script,
+        day_obs=None,
+        opsim_filename=opsim_fname,
     )
 
     print("NSIDE: ", nside)
@@ -665,7 +611,7 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
         help="random number seed for anomalous scatter in overhead",
     )
     parser.add_argument("--tags", type=str, default=[], nargs="*", help="The tags on the simulation.")
-    parser.add_argument("--results", type=str, default='', help="Results directory.")
+    parser.add_argument("--results", type=str, default="", help="Results directory.")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
     with open(args.scheduler, "rb") as sched_io:
@@ -702,10 +648,7 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     if keep_rewards:
         scheduler.keep_rewards = keep_rewards
 
-    survey_info = lsst_support.survey_times(
-        add_downtime=False,
-        day_obs=day_obs
-        )
+    survey_info = lsst_support.survey_times(add_downtime=False, day_obs=day_obs)
 
     LOGGER.info("Starting simulation")
     observations, scheduler, observatory, rewards, obs_rewards, survey_info = run_sim(
@@ -735,6 +678,6 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
         LOGGER.info(f"Wrote results to directory: {data_path.name}")
 
     else:
-        _ = consolidate_and_save(observatory, observations, initial_opsim, run_name + ".db")
+        _ = lsst_support.save_opsim(observatory, observations, initial_opsim, run_name + ".db")
 
     return 0

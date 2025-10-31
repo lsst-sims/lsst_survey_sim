@@ -1,13 +1,14 @@
+import healpy as hp
 import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 import numpy as np
 import numpy.typing as npt
 import skyproj
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure, SubFigure
 from rubin_scheduler.scheduler.utils import get_current_footprint
 from rubin_sim.maf import MetricBundle
 
-__all__ = ("get_background", "make_plot")
+__all__ = ("get_background", "hp_laea", "hp_moll", "make_plot")
 
 
 def get_background(nside: int = 64) -> npt.NDArray:
@@ -15,6 +16,30 @@ def get_background(nside: int = 64) -> npt.NDArray:
     bg_fp = np.where(fp["r"] == 0, np.nan, fp["r"])
     bg_fp = np.where(bg_fp > 1, 1, bg_fp)
     return bg_fp
+
+
+def hp_laea(
+    hp_array: npt.NDArray,
+    alpha: npt.NDArray | None = None,
+    label: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> None:
+    """Super quick figure."""
+    hp.azeqview(hp_array, alpha=alpha, rot=(0, -90, 0), lamb=True, reso=17.5, min=vmin, max=vmax, title=label)
+    hp.graticule()
+
+
+def hp_moll(
+    hp_array: npt.NDArray,
+    alpha: npt.NDArray | None = None,
+    label: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> None:
+    """Super quick figure."""
+    hp.mollview(hp_array, alpha=alpha, min=vmin, max=vmax, title=label)
+    hp.graticule()
 
 
 def make_plot(
@@ -26,11 +51,12 @@ def make_plot(
     background: npt.NDArray | None = None,
     title: str | None = None,
     label_dec: bool = True,
-) -> Figure:
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 7))
-    else:
+) -> Figure | SubFigure | None:
+    """Nicer figure."""
+    if ax is not None:
         fig = ax.get_figure()
+    else:
+        fig, ax = plt.subplots(figsize=(8, 7))
 
     if proj == "laea":
         sp = skyproj.LaeaSkyproj(
