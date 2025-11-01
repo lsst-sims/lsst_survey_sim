@@ -68,17 +68,17 @@ def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_con
     """
     repo_url = "https://github.com/lsst-ts/ts_config_scheduler"
 
-    # Perform a shallow clone with a depth of 1
+    # Clone new or use existing repo.
     try:
         repo = git.Repo.clone_from(repo_url, clone_path)
         LOGGER.info(f"ts_config_scheduler repository cloned to: {clone_path} with depth 1")
     except git.GitCommandError:
         repo = git.Repo(clone_path)
-        LOGGER.error(f"Directory {clone_path} already exists. Let's assume it's the repo.")
+        LOGGER.info(f"Directory {clone_path} already exists. Let's assume it's the repo.")
+        repo.git.pull()
     # Check out the commit
     repo.git.checkout(ts_config_scheduler_commit)
     LOGGER.info(f"Checked out commit {ts_config_scheduler_commit} in {clone_path}.")
-    return
 
 
 def fetch_previous_visits(
