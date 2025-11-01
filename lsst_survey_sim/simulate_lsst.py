@@ -90,7 +90,7 @@ def fetch_previous_visits(
     ----------
     day_obs
         The day_obs (integer) of the day on which to start the simulation.
-        Will fetch all science visits *up to* this day_obs.
+        Will fetch all science visits *up to* (<) this day_obs.
     tokenfile
         Path to the RSP tokenfile.
         See also `rubin_nights.connections.get_access_token`.
@@ -195,7 +195,8 @@ def setup_scheduler(
         # Run the DDF configuration
         result = subprocess.run(config_ddf_script_path, capture_output=True)
         LOGGER.info(result.stdout)
-        LOGGER.error(result.stderr)
+        if len(result.stderr) > 0:
+            LOGGER.error(result.stderr)
 
     # Set up the scheduler from the config file from ts_config_ocs.
     nside, scheduler = get_scheduler_from_config(config_script_path)
