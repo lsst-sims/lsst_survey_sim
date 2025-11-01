@@ -146,14 +146,15 @@ def survey_times(
     downtime_end = downtime_start + downtime_length
     survey_end = survey_start + TimeDelta(365 * 10.2, format="jd")
 
-    dayobsmjd = np.arange(survey_start.mjd, survey_end.mjd + 0.5, 1)
+    count_start = np.min([survey_start - TimeDelta(30, format="jd"), downtime_start])
+    dayobsmjd = np.arange(count_start.mjd, survey_end.mjd + 0.5, 1)
 
     # Find sunset and sunrise info during the period of downtime to model here
     lsst_site = Site("LSST")
     almanac = Almanac(mjd_start=survey_start.mjd)
 
     # Start with these configured only over the downtime simulated here
-    alm_start = np.where(abs(almanac.sunsets["sunset"] - downtime_start.mjd) < 0.5)[0][0]
+    alm_start = np.where(abs(almanac.sunsets["sunset"] - count_start.mjd) < 0.5)[0][0]
     alm_end = np.where(abs(almanac.sunsets["sunset"] - downtime_end.mjd) < 0.5)[0][0]
     sunsets = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
     actual_sunsets = almanac.sunsets[alm_start:alm_end]["sunset"]
@@ -313,6 +314,8 @@ def survey_times(
             logger.warning("No visits found and looking for real downtime")
         else:
             # Identify gaps/downtime starts
+            # Note that visits should be consdb or converted consdb -
+            # so obs_end_mjd should be present regardless of name of startMJD
             if "obs_start_mjd" in visits.columns:
                 obs_start_mjd_key = "obs_start_mjd"
             else:
@@ -349,14 +352,14 @@ def survey_times(
             # Use real downtime where we have that information, but continue
             # with sim downtime
             keep_starts = down_starts[np.where(down_starts >= day_obs_mjd)]
-            keep_ends = down_ends[np.where(down_ends > day_obs_mjd)]
+            keep_ends = down_ends[np.where(down_starts >= day_obs_mjd)]
 
             down_starts = np.concatenate([d_starts, keep_starts])
             down_ends = np.concatenate([d_ends, keep_ends])
 
     # Trim all of these to sunrise/sunset
     # use sunsets/sunrises over the whole survey
-    alm_start = np.where(abs(almanac.sunsets["sunset"] - survey_start.mjd) < 0.5)[0][0]
+    alm_start = np.where(abs(almanac.sunsets["sunset"] - count_start.mjd) < 0.5)[0][0]
     alm_end = np.where(abs(almanac.sunsets["sunset"] - survey_end.mjd) < 0.5)[0][0]
     sunsets = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
     sunrises = almanac.sunsets[alm_start:alm_end]["sun_n12_rising"]
@@ -452,7 +455,7 @@ def survey_times(
 
 
 def setup_observatory_summit(
-    survey_info: dict, seeing: float | None = None, add_clouds: bool = False
+    survey_info: dict, seeing: float | str | None = None, add_clouds: bool = False
 ) -> ModelObservatory:
     """Configure a `summit-10` model observatory.
     This approximates average summit performance at present.
@@ -464,8 +467,9 @@ def setup_observatory_summit(
         Note that the survey_info carries the downtime information,
         as well as the survey_start information.
     seeing
-        If specified (as a float), then the constant seeing model will be
-        used, delivering atmospheric seeing with `seeing` arcsecond values.
+        If specified as a float, then the constant seeing model will be used.
+        If specified as string, this will be used as the seeing database path.
+        If None, the standard model seeing database will be used.
     add_clouds
         If True, use our standard cloud downtime model.
         If False, use the 'ideal' cloud model resulting in no downtime.
@@ -476,14 +480,16 @@ def setup_observatory_summit(
         ModelObservatory complete with seeing model, cloud (weather downtime)
         model, and also downtimes (due to engineering).
     """
+    seeing_data = None
+    seeing_db = None
     if seeing is not None:
-        seeing_data = ConstantSeeingData()
-        seeing_data.fwhm_500 = seeing
-    else:
-        # Else use standard seeing data
-        seeing_data = None
-    # Use a bigger system contribution
-    seeing_model = SeeingModel(telescope_seeing=0.52)
+        if isinstance(seeing, (float, int)):
+            seeing_data = ConstantSeeingData()
+            seeing_data.fwhm_500 = seeing
+        else:
+            seeing_db = seeing
+    # Potentially a bigger system contribution
+    seeing_model = SeeingModel()
 
     if add_clouds:
         cloud_data = None
@@ -496,6 +502,7 @@ def setup_observatory_summit(
         mjd_start=survey_info["survey_start"].mjd,
         cloud_data=cloud_data,
         seeing_data=seeing_data,
+        seeing_db=seeing_db,
         wind_data=None,
         downtimes=survey_info["downtimes"],
         sim_to_o=None,

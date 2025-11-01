@@ -27,7 +27,7 @@ dependencies = [
     "pandas",
     "rubin-nights >= 0.7.0",
     "rubin-scheduler == 3.19.0",
-    "rubin-sim >= 2.5.1",
+    "rubin-sim >= 2.6.0",
     "schedview >= 0.19.1"
 ]
 
