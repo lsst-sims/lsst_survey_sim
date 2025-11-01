@@ -20,13 +20,13 @@ dynamic = [ "version" ]
 dependencies = [
     "astroplan",
     "astropy",
-    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.18.0",
+    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.19.0",
     "healpy",
     "matplotlib",
     "numpy",
     "pandas",
     "rubin-nights >= 0.7.0",
-    "rubin-scheduler == 3.18.1",
+    "rubin-scheduler == 3.19.0",
     "rubin-sim >= 2.5.1",
     "schedview >= 0.19.1"
 ]
