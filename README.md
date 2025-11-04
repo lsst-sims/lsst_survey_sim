@@ -12,29 +12,32 @@ rs_download_data --update --dirs sim_baseline
 ```
 
 The advantage of the above is that you will have the appropriate versions of ts_fbs_utils and rubin_scheduler that should be in use at the summit.
-However, installing this way in the RSP environment is a problem, as almost all of the necessary packages are already installed in the RSP environment. 
+However, installing this way in the RSP environment is a problem, as almost all of the necessary packages are already installed in the RSP environment and it may not work easily to change the package version.
 
 In the RSP, 
 ```
 git clone git@github.com:/lsst-sims/lsst_survey_sim.git
 cd lsst_survey_sim
 pip install -e . --no-deps
-```
-is a better choice. In the RSP, setting 
-```
+
 os.environ["RUBIN_SIM_DATA_DIR"] = "/sdf/data/rubin/shared/rubin_sim_data"
 ```
-will provide access to the necessary scheduler and rubin-sim data.
+is probably a better choice and will provide access to the necessary scheduler and rubin-sim data.
 
-Then ts_fbs_utils will have to be installed. In general, installing and using `develop`
-of ts-fbs-utils is fairly safe for new simulations, but checking the version in the lsst-survey-sims dependencies can be helpful. Either
+Then only requirements for lsst_survey_sims that are not provided in the RSP are ts_fbs_utils and rubin_nights.  In general, installing and using `develop`
+of ts-fbs-utils is fairly safe for new simulations, but checking the version in the lsst-survey-sims dependencies can be helpful. Either of
 ```
 pip install git+https://github.com/lsst-ts/ts_fbs_utils
+pip install git+https://github.com/lsst-sims/rubin_nights
 ```
 or 
 ```
 git clone git@github.com:lsst-ts/ts_fbs_utils.git
 cd ts_fbs_utils
+pip install -e . --no-deps
+cd .. 
+git clone git@github.com:lsst-sims/rubin_nights.git
+cd rubin_nights
 pip install -e . --no-deps
 ```
 are suitable.
