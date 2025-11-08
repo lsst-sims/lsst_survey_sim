@@ -1,3 +1,4 @@
+import os
 import argparse
 import logging
 import pickle
@@ -69,12 +70,13 @@ def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_con
     repo_url = "https://github.com/lsst-ts/ts_config_scheduler"
 
     # Clone new or use existing repo.
-    try:
+    if not os.path.isdir(clone_path):
         repo = git.Repo.clone_from(repo_url, clone_path)
         LOGGER.info(f"ts_config_scheduler repository cloned to: {clone_path} with depth 1")
-    except git.GitCommandError:
+    else:
         repo = git.Repo(clone_path)
         LOGGER.info(f"Directory {clone_path} already exists. Let's assume it's the repo.")
+        repo.git.checkout("develop")
         repo.git.pull()
     # Check out the commit
     repo.git.checkout(ts_config_scheduler_commit)
