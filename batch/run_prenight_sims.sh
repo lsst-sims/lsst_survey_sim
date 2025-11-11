@@ -51,8 +51,7 @@ else
   LSST_SURVEY_SIM_REFERENCE="main"
 fi
 
-pip install --target=${PACKAGE_DIR} \
-  git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE} \
+pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE} \
   click \
   psycopg2 \
   botocore \
