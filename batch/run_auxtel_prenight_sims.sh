@@ -99,7 +99,7 @@ fetch_lsst_visits 20000101 completed_visits.db ~/.lsst/usdf_access_token
 
 echo "Creating scheduler pickle"
 date --iso=s
-make_lsst_scheduler scheduler.p --opsim completed_visits.db --config_script ${SCHED_CONFIG_FNAME}
+make_lsst_scheduler scheduler.p --opsim completed_visits.db --config_script ${SCHED_CONFIG_FNAME} --config_ddf_script ""
 
 echo "Creating model observatory"
 date --iso=s
