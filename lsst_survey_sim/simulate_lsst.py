@@ -557,6 +557,12 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     scheduler_config_script = args.config_script
     scheduler_ddf_config_script = args.config_ddf_script
 
+    # The argparse argument of config_ddf_script cannot
+    # be set to None on the command line, so use
+    # the empty string as a sentinel value.
+    if len(scheduler_ddf_config_script) == 0:
+        scheduler_ddf_config_script = None
+
     scheduler, initial_opsim, nside = setup_scheduler(
         config_script_path=scheduler_config_script,
         config_ddf_script_path=scheduler_ddf_config_script,
