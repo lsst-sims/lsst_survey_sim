@@ -20,15 +20,15 @@ dynamic = [ "version" ]
 dependencies = [
     "astroplan",
     "astropy",
-    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.19.1",
+    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.19.2",
     "healpy",
     "matplotlib",
     "numpy",
     "pandas",
     "rubin-nights >= 0.7.0",
-    "rubin-scheduler == 3.20.0",
+    "rubin-scheduler == 3.20.1",
     "rubin-sim >= 2.6.0",
-    "schedview >= 0.19.1"
+    "schedview >= 0.20.0"
 ]
 
 [project.optional-dependencies]
@@ -66,7 +66,7 @@ ignore_missing_imports = "True"
 
 [tool.black]
 line-length = 110
-target-version = ["py312"]
+target-version = ["py313"]
 
 [tool.isort]
 profile = "black"
@@ -77,7 +77,7 @@ exclude = [
     "__init__.py", "notebooks",
 ]
 line-length = 110
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 ignore = [
