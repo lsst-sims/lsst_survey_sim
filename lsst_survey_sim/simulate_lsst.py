@@ -1,6 +1,6 @@
-import os
 import argparse
 import logging
+import os
 import pickle
 import sqlite3
 import subprocess
@@ -9,6 +9,7 @@ from typing import Any
 
 import astropy.units as u
 import git
+import healpy as hp
 import numpy as np
 import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
@@ -16,10 +17,11 @@ import rubin_nights.rubin_sim_addons as rn_sim
 from astroplan import Observer
 from astropy.time import Time, TimeDelta
 from rubin_nights import augment_visits, connections
+from rubin_nights.influx_query import InfluxQueryClient
 from rubin_scheduler.scheduler import sim_runner
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
-from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter
+from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter, SimTargetooServer, TargetoO
 from rubin_scheduler.utils import DEFAULT_NSIDE, Site
 
 try:
@@ -39,6 +41,7 @@ LOGGER = logging.getLogger(__name__)
 __all__ = [
     "get_configuration",
     "fetch_previous_visits",
+    "fetch_too_events",
     "setup_scheduler",
     "setup_band_scheduler",
     "setup_observatory",
@@ -72,7 +75,7 @@ def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_con
     # Clone new or use existing repo.
     if not os.path.isdir(clone_path):
         repo = git.Repo.clone_from(repo_url, clone_path)
-        LOGGER.info(f"ts_config_scheduler repository cloned to: {clone_path} with depth 1")
+        LOGGER.info(f"ts_config_scheduler repository cloned to: {clone_path}.")
     else:
         repo = git.Repo(clone_path)
         LOGGER.info(f"Directory {clone_path} already exists. Let's assume it's the repo.")
@@ -142,6 +145,62 @@ def fetch_previous_visits(
     else:
         visits = None
     return visits
+
+
+def fetch_too_events(t_start: Time, t_end: Time) -> list[TargetoO]:
+    """Fetch ToO triggers from EFD and convert to TargetoO events.
+
+    For success, this requires access to `base`.
+    (i.e. summit VPN or running on base-lsp.lsst.codes).
+
+    Parameters
+    ----------
+    t_start, t_end
+        Time period to check the EFD for too_alerts.
+
+    Returns
+    -------
+    toos : `list` [ `TargetoO` ]
+        List of rubin_scheduler.scheduler.utils.TargetoO objects.
+        Add to conditions (or ModelObservatory).
+    """
+    too_client = InfluxQueryClient("base", db_name="lsst.scimma")
+    alerts = too_client.select_time_series("lsst.scimma.too_alert", "*", t_start, t_end)
+
+    # Find columns with reward_maskXXX and sort them in order
+    reward_map_idxs = sorted(
+        [int(c.split("reward_map")[-1]) for c in alerts.columns if "reward_map" in c and "nside" not in c]
+    )
+    reward_map_cols = [f"reward_map{c}" for c in reward_map_idxs]
+    ra, dec = np.radians(hp.pix2ang(32, reward_map_idxs, nest=False, lonlat=True))
+
+    # (note that the reward_map cols are in NEST order and FBS expects RING
+    def _alert_to_too(a: pd.Series) -> TargetoO:
+        reward_map = np.zeros(hp.nside2npix(a.reward_map_nside), bool)
+        reward_map[reward_map_idxs] = a[reward_map_cols].values
+        reward_map = hp.reorder(reward_map, n2r=True)
+        ra_rad_center = ra[reward_map].mean()
+        dec_rad_center = dec[reward_map].mean()
+        try:
+            mjd_time = Time(a.event_trigger_timestamp, format="isot", scale="utc").tai.mjd
+        except ValueError:
+            LOGGER.error(f"Could not convert timestamp {a.event_trigger_timestamp}")
+            return None
+        too = TargetoO(
+            tooid=a.source,
+            footprint=reward_map,
+            ra_rad_center=ra_rad_center,
+            dec_rad_center=dec_rad_center,
+            mjd_start=mjd_time,
+            duration=1.0,
+            too_type=a.alert_type,
+            posterior_distance=None,
+        )
+        return too
+
+    toos = alerts.apply(_alert_to_too, axis=1)
+    toos = [too for too in toos if too is not None]
+    return toos
 
 
 def setup_scheduler(
@@ -260,6 +319,7 @@ def setup_observatory(
     seeing: float | None = None,
     real_downtime: bool = False,
     initial_opsim: pd.DataFrame | None = None,
+    toos: SimTargetooServer | None = None,
 ) -> tuple[ModelObservatory, dict]:
     """Set up the model observatory.
 
@@ -302,6 +362,9 @@ def setup_observatory(
     initial_opsim
         If initial_opsim is not None, use these visits instead of fetching or
         reading from disk. These should be *opsim* formatted visits.
+    toos
+        A `SimTargetooServer` wrapping a list of TargetoO
+        (target of opportunity) events.
 
     Returns
     -------
@@ -326,7 +389,9 @@ def setup_observatory(
     survey_info.update(lsst_support.survey_footprint(nside=nside))
 
     # Now that we have downtime, set up model observatory.
-    observatory = lsst_support.setup_observatory_summit(survey_info, seeing=seeing, add_clouds=add_clouds)
+    observatory = lsst_support.setup_observatory_summit(
+        survey_info, seeing=seeing, add_clouds=add_clouds, toos=toos
+    )
     return observatory, survey_info
 
 

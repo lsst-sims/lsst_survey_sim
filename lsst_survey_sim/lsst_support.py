@@ -15,6 +15,7 @@ from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.utils import (
     ObservationArray,
     SchemaConverter,
+    SimTargetooServer,
     get_current_footprint,
     run_info_table,
 )
@@ -455,7 +456,10 @@ def survey_times(
 
 
 def setup_observatory_summit(
-    survey_info: dict, seeing: float | str | None = None, add_clouds: bool = False
+    survey_info: dict,
+    seeing: float | str | None = None,
+    add_clouds: bool = False,
+    toos: SimTargetooServer | None = None,
 ) -> ModelObservatory:
     """Configure a `summit-10` model observatory.
     This approximates average summit performance at present.
@@ -473,6 +477,9 @@ def setup_observatory_summit(
     add_clouds
         If True, use our standard cloud downtime model.
         If False, use the 'ideal' cloud model resulting in no downtime.
+    toos
+        A `SimTargetooServer` wrapping a list of TargetoO
+        (target of opportunity) events.
 
     Returns
     -------
@@ -505,7 +512,7 @@ def setup_observatory_summit(
         seeing_db=seeing_db,
         wind_data=None,
         downtimes=survey_info["downtimes"],
-        sim_to_o=None,
+        sim_to_o=toos,
     )
     observatory.seeing_model = seeing_model
     # "10 percent TMA" - but this is a label from the summit, not 10% in all
