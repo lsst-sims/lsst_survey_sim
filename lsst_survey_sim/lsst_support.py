@@ -180,7 +180,7 @@ def survey_times(
 
     # And we might as well throw in being slow on sky
     d_starts = actual_sunsets
-    d_ends = sunsets + 0.5 / 24
+    d_ends = sunsets + 30 / 60 / 24
 
     down_starts = np.concatenate([down_starts, d_starts])
     down_ends = np.concatenate([down_ends, d_ends])
@@ -321,12 +321,16 @@ def survey_times(
                 obs_start_mjd_key = "obs_start_mjd"
             else:
                 obs_start_mjd_key = "observationStartMJD"
-            edges = np.where(np.diff(visits[obs_start_mjd_key].values) > 250 / 60 / 60 / 24)[0]
+            edges = np.where(np.diff(visits[obs_start_mjd_key].values) > 230 / 60 / 60 / 24)[0]
             dropout_starts = visits.iloc[edges]["obs_end_mjd"].values
             dropout_ends = visits.iloc[edges + 1][obs_start_mjd_key].values - 150 / 60 / 60 / 24
 
             dropout_starts = np.concatenate([dropout_starts, np.array([visits.obs_end_mjd.max()])])
-            dropout_ends = np.concatenate([dropout_ends, np.array([day_obs_mjd - 0.001])])
+            # If we query during the night, we could have a dropout_start after day_obs_mjd.
+            last_dropout_end = np.array([day_obs_mjd - 0.001])
+            if dropout_ends.max() > last_dropout_end:
+                last_dropout_end += 1
+            dropout_ends = np.concatenate([dropout_ends, last_dropout_end])
 
             d_starts = []
             d_ends = []
@@ -459,7 +463,7 @@ def setup_observatory_summit(
     survey_info: dict,
     seeing: float | str | None = None,
     add_clouds: bool = False,
-    toos: SimTargetooServer | None = None,
+    too_server: SimTargetooServer | None = None,
 ) -> ModelObservatory:
     """Configure a `summit-10` model observatory.
     This approximates average summit performance at present.
@@ -477,7 +481,7 @@ def setup_observatory_summit(
     add_clouds
         If True, use our standard cloud downtime model.
         If False, use the 'ideal' cloud model resulting in no downtime.
-    toos
+    too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
 
@@ -512,7 +516,7 @@ def setup_observatory_summit(
         seeing_db=seeing_db,
         wind_data=None,
         downtimes=survey_info["downtimes"],
-        sim_to_o=toos,
+        sim_to_o=too_server,
     )
     observatory.seeing_model = seeing_model
     # "10 percent TMA" - but this is a label from the summit, not 10% in all

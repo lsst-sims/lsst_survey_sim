@@ -19,8 +19,10 @@ from astropy.time import Time, TimeDelta
 from rubin_nights import augment_visits, connections
 from rubin_nights.influx_query import InfluxQueryClient
 from rubin_scheduler.scheduler import sim_runner
+from rubin_scheduler.scheduler.features import Conditions
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
+from rubin_scheduler.scheduler.surveys import ToOScriptedSurvey
 from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter, SimTargetooServer, TargetoO
 from rubin_scheduler.utils import DEFAULT_NSIDE, Site
 
@@ -147,7 +149,7 @@ def fetch_previous_visits(
     return visits
 
 
-def fetch_too_events(t_start: Time, t_end: Time) -> list[TargetoO]:
+def fetch_too_events(t_start: Time, t_end: Time, site: str = "base") -> list[TargetoO] | None:
     """Fetch ToO triggers from EFD and convert to TargetoO events.
 
     For success, this requires access to `base`.
@@ -157,49 +159,67 @@ def fetch_too_events(t_start: Time, t_end: Time) -> list[TargetoO]:
     ----------
     t_start, t_end
         Time period to check the EFD for too_alerts.
+    site
+        The name of the EFD to check for alerts.
+        Default is `base`, but `summit` may be valid.
 
     Returns
     -------
-    toos : `list` [ `TargetoO` ]
+    toos : `list` [ `TargetoO` ] or None
         List of rubin_scheduler.scheduler.utils.TargetoO objects.
         Add to conditions (or ModelObservatory).
+        Returns None if no ToOs were within t_start to t_end or
+        if there was an error connecting or processing the ToOs.
     """
-    too_client = InfluxQueryClient("base", db_name="lsst.scimma")
+    too_client = InfluxQueryClient(site, db_name="lsst.scimma")
+
+    # Do we have a usable connection to this EFD?
+    topics = too_client.get_topics()
+    if len(topics) == 0:
+        LOGGER.error(f"No connection to {site} efd for alerts")
+        return None
+
     alerts = too_client.select_time_series("lsst.scimma.too_alert", "*", t_start, t_end)
-
-    # Find columns with reward_maskXXX and sort them in order
-    reward_map_idxs = sorted(
-        [int(c.split("reward_map")[-1]) for c in alerts.columns if "reward_map" in c and "nside" not in c]
-    )
-    reward_map_cols = [f"reward_map{c}" for c in reward_map_idxs]
-    ra, dec = np.radians(hp.pix2ang(32, reward_map_idxs, nest=False, lonlat=True))
-
-    # (note that the reward_map cols are in NEST order and FBS expects RING
-    def _alert_to_too(a: pd.Series) -> TargetoO:
-        reward_map = np.zeros(hp.nside2npix(a.reward_map_nside), bool)
-        reward_map[reward_map_idxs] = a[reward_map_cols].values
-        reward_map = hp.reorder(reward_map, n2r=True)
-        ra_rad_center = ra[reward_map].mean()
-        dec_rad_center = dec[reward_map].mean()
-        try:
-            mjd_time = Time(a.event_trigger_timestamp, format="isot", scale="utc").tai.mjd
-        except ValueError:
-            LOGGER.error(f"Could not convert timestamp {a.event_trigger_timestamp}")
-            return None
-        too = TargetoO(
-            tooid=a.source,
-            footprint=reward_map,
-            ra_rad_center=ra_rad_center,
-            dec_rad_center=dec_rad_center,
-            mjd_start=mjd_time,
-            duration=1.0,
-            too_type=a.alert_type,
-            posterior_distance=None,
+    if len(alerts) > 0:
+        # Find columns with reward_maskXXX and sort them in order
+        reward_map_idxs = sorted(
+            [int(c.split("reward_map")[-1]) for c in alerts.columns if "reward_map" in c and "nside" not in c]
         )
-        return too
+        reward_map_cols = [f"reward_map{c}" for c in reward_map_idxs]
+        ra, dec = np.radians(hp.pix2ang(32, reward_map_idxs, nest=False, lonlat=True))
 
-    toos = alerts.apply(_alert_to_too, axis=1)
-    toos = [too for too in toos if too is not None]
+        # (note that the reward_map cols are in NEST order and FBS expects RING
+        def _alert_to_too(a: pd.Series) -> TargetoO:
+            reward_map = np.zeros(hp.nside2npix(a.reward_map_nside), bool)
+            reward_map[reward_map_idxs] = a[reward_map_cols].values
+            reward_map = hp.reorder(reward_map, n2r=True)
+            ra_rad_center = ra[reward_map].mean()
+            dec_rad_center = dec[reward_map].mean()
+            try:
+                mjd_time = Time(a.event_trigger_timestamp, format="isot", scale="utc").tai.mjd
+            except ValueError:
+                LOGGER.error(f"Could not convert timestamp {a.event_trigger_timestamp}")
+                return None
+            too = TargetoO(
+                # tooid=a.source, # is what I'd like to do
+                tooid=a.counter,
+                footprint=reward_map,
+                ra_rad_center=ra_rad_center,
+                dec_rad_center=dec_rad_center,
+                mjd_start=mjd_time,
+                # We will need to update duration in ts_scheduler too
+                duration=10.0,
+                too_type=a.alert_type,
+                posterior_distance=None,
+            )
+            return too
+
+        alerts["counter"] = np.arange(1, len(alerts) + 1, 1)
+        toos = alerts.apply(_alert_to_too, axis=1)
+        toos = [too for too in toos if too is not None]
+    else:
+        LOGGER.info(f"No alerts found at {site} efd")
+        toos = None
     return toos
 
 
@@ -207,10 +227,10 @@ def setup_scheduler(
     config_script_path: str,
     config_ddf_script_path: str | None = None,
     day_obs: int | None = None,
+    too_server: SimTargetooServer | None = None,
+    band_scheduler: DateSwapBandScheduler | None = None,
     initial_opsim: pd.DataFrame | None = None,
     opsim_filename: str | None = None,
-    tokenfile: str | None = None,
-    site: str = "usdf",
 ) -> tuple[CoreScheduler, pd.DataFrame, int]:
     """Set up the survey scheduler.
      Read previous visits into scheduler for startup.
@@ -229,21 +249,21 @@ def setup_scheduler(
         Will fetch all visits *up to* this day_obs.
         If initial_opsim is passed, this can be ignored.
         If None, and no initial_opsim and no opsim_filename, will use "today".
+    too_server
+        A `SimTargetooServer` wrapping a list of TargetoO
+        (target of opportunity) events.
+        This is needed for setting up obs_wanted for the ToO surveys.
+        If None, scheduler will be activated without any ToO knowledge.
+    band_scheduler
+        The BandScheduler to determine current mounted filters.
+        This is needed for setting up obs_wanted for the ToO surveys.
     initial_opsim
-        If initial_opsim is not None, use this dataframe instead of fetching or
+        If initial_opsim is not None, use this dataframe instead of
         reading from disk. These should be *opsim* formatted visits.
-        This will basically ignore all other kwargs.
+        If not None, this will ignore all other kwargs.
     opsim_filename
         Get previous visits from a file, instead of directly from
         the ConsDB. If set, then consdb will not be queried.
-    tokenfile
-        Path to the RSP tokenfile.
-        See also `rubin_nights.connections.get_access_token`.
-        Default None will use `ACCESS_TOKEN` environment variable.
-    site
-        The site (`usdf`, `usdf-dev`, `summit` ..) location at
-        which to query services. Must match tokenfile origin.
-
 
     Returns
     -------
@@ -261,17 +281,40 @@ def setup_scheduler(
 
     # Set up the scheduler from the config file from ts_config_ocs.
     nside, scheduler = get_scheduler_from_config(config_script_path)
+
+    if day_obs is None:
+        day_obs = rn_dayobs.today_day_obs()
+    day_obs_time = rn_dayobs.day_obs_to_time(day_obs)
+
+    # Set up ToOScriptedSurveys to be ready for ToOs.
+    if too_server is not None and band_scheduler is not None:
+        too_objs = too_server(day_obs_time.mjd)
+        # This next bit is a total hack because mjd0 in ToOScriptedSurvey
+        # should probably be the time of the ToO mjd-start, NOT the
+        # current conditions.mjd ...
+        if too_objs is not None:
+            LOGGER.info(f"Adding {len(too_objs)} ToO to FBS setup.")
+            for too in too_objs:
+                # Do this one at a time right now because of too.mjd
+                conditions = Conditions(nside=nside, mjd=too.mjd_start)
+                conditions.mounted_bands = band_scheduler(conditions)
+                conditions.current_band = "r"
+                conditions.targets_of_opportunity = [too]
+                # Update conditions in surveys so they set up obs_wanted.
+                for surveys in scheduler.survey_lists:
+                    for survey in surveys:
+                        survey.update_conditions(conditions)
+        else:
+            LOGGER.info("Received too_server but no active ToOs.")
+
     # Add previous observations.
     if initial_opsim is None:
-        if opsim_filename is None:
-            if day_obs is None:
-                day_obs = rn_dayobs.today_day_obs()
-            # Fetch the initial opsim visits from the consdb.
-            initial_opsim = fetch_previous_visits(day_obs, tokenfile, site, convert_to_opsim=True)
-        else:
+        if opsim_filename is not None:
             # Read from the datafile `filename`.
             con = sqlite3.connect(opsim_filename)
             initial_opsim = pd.read_sql("select * from observations;", con)
+        else:
+            LOGGER.info("Starting without any initial_opsim visits.")
 
     # Convert opsim visits to ObservationArray and feed the scheduler.
     if initial_opsim is not None and len(initial_opsim) > 0:
@@ -319,7 +362,7 @@ def setup_observatory(
     seeing: float | None = None,
     real_downtime: bool = False,
     initial_opsim: pd.DataFrame | None = None,
-    toos: SimTargetooServer | None = None,
+    too_server: SimTargetooServer | None = None,
 ) -> tuple[ModelObservatory, dict]:
     """Set up the model observatory.
 
@@ -362,7 +405,7 @@ def setup_observatory(
     initial_opsim
         If initial_opsim is not None, use these visits instead of fetching or
         reading from disk. These should be *opsim* formatted visits.
-    toos
+    too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
 
@@ -390,7 +433,7 @@ def setup_observatory(
 
     # Now that we have downtime, set up model observatory.
     observatory = lsst_support.setup_observatory_summit(
-        survey_info, seeing=seeing, add_clouds=add_clouds, toos=toos
+        survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
     )
     return observatory, survey_info
 
