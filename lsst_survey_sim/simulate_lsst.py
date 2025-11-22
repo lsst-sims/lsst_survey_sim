@@ -22,7 +22,6 @@ from rubin_scheduler.scheduler import sim_runner
 from rubin_scheduler.scheduler.features import Conditions
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
-from rubin_scheduler.scheduler.surveys import ToOScriptedSurvey
 from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter, SimTargetooServer, TargetoO
 from rubin_scheduler.utils import DEFAULT_NSIDE, Site
 
@@ -319,7 +318,9 @@ def setup_scheduler(
     # Convert opsim visits to ObservationArray and feed the scheduler.
     if initial_opsim is not None and len(initial_opsim) > 0:
         sch_obs = SchemaConverter().opsimdf2obs(initial_opsim)
-        scheduler.add_observations_array(sch_obs)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            scheduler.add_observations_array(sch_obs)
     return scheduler, initial_opsim, nside
 
 
