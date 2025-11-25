@@ -29,6 +29,7 @@ from rubin_scheduler.site_models import (
 from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 
 __all__ = [
+    "set_sim_flags",
     "survey_footprint",
     "survey_times",
     "setup_observatory_summit",
@@ -38,6 +39,72 @@ __all__ = [
 astropy.utils.iers.conf.iers_degraded_accuracy = "ignore"
 
 logger = logging.getLogger(__name__)
+
+
+def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
+    """Set some likely flags for the observatory setup, based on
+    the day_obs (of the simulation start) compared to today's day_obs.
+
+    Parameters
+    ----------
+    day_obs
+        The YYYYMMDD of the start of the simulation.
+    sim_nights
+        The number of nights for which to run the simulation.
+
+    Returns
+    -------
+    sim_flags :  `dict`
+        Dictionary of day_obs, next_day_obs, today_day_obs,
+        and associated flags for setting up the observatory
+        (add_downtime, real_downtime, and add_clouds) based on the
+        most likely combinations that would be useful given day_obs
+        and the current (today) day_obs.
+    """
+    # today_dayobs is the day of today -
+    # if it is larger than day_obs, then we are running in the past.
+    today_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.today_day_obs())
+
+    # Knowing the day after day_obs will be useful:
+    next_day_obs_time = rn_dayobs.day_obs_to_time(day_obs) + TimeDelta(1, format="jd")
+    next_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(next_day_obs_time))
+
+    # Some parameters relating to downtime setup for model observatory
+    day_downtime = day_obs
+    if sim_nights <= 2:
+        # One or two nights, probably no downtime or clouds.
+        add_downtime = False
+        real_downtime = False
+        add_clouds = False
+    else:
+        # Multiple nights, probably want downtime and clouds.
+        add_downtime = True
+        real_downtime = True
+        add_clouds = True
+    # But -- beyond those, if we are running in the PAST,
+    # we will want to use the real on-sky time for the FBS visits.
+    # This means adding downtime, using the real-downtime,
+    # but not adding clouds.
+    # We will also need to be careful about what data we query for
+    # and what we add to the FBS.
+    if day_obs < today_day_obs:
+        print("Checking the past, will restrict uptime to time acquiring science visits")
+        add_downtime = True
+        real_downtime = True
+        add_clouds = False
+        # include day_obs info in real_downtime calculation
+        day_downtime = next_day_obs
+
+    sim_flags = {
+        "day_obs": day_obs,
+        "next_day_obs": next_day_obs,
+        "day_obs_downtime": day_downtime,
+        "today_day_obs": today_day_obs,
+        "add_downtime": add_downtime,
+        "real_downtime": real_downtime,
+        "add_clouds": add_clouds,
+    }
+    return sim_flags
 
 
 def survey_footprint(
@@ -68,7 +135,8 @@ def survey_footprint(
 
 def survey_times(
     random_seed: int = 55,
-    early_dome_closure: float = 1.5,
+    minutes_after_sunset12: float = 30,
+    early_dome_closure: float = 1.0,
     add_downtime: bool = True,
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
@@ -92,9 +160,13 @@ def survey_times(
         Print information about start/end times and downtime fraction.
     random_seed
         Random value to seed downtimes with
+    minutes_after_sunset12
+        How long after -12 deg sunset to get on sky, in minutes.
+        In theory, this should be 0.
+        In practice, this tends to be about 30 or 40 minutes at the moment.
     early_dome_closure
         Close the dome (start downtime) `early_dome_closure` hours before
-        0-degree sunrise. A closure 1 hours before sunrise aligns with
+        0-degree sunrise. A closure 1 hour before sunrise aligns with
         current operational guidelines (-18 degree twilight). In hours.
     add_downtime
         If False, do not add unscheduled downtime - this still adds early
@@ -180,7 +252,7 @@ def survey_times(
 
     # And we might as well throw in being slow on sky
     d_starts = actual_sunsets
-    d_ends = sunsets + 30 / 60 / 24
+    d_ends = sunsets + minutes_after_sunset12 / 60 / 24
 
     down_starts = np.concatenate([down_starts, d_starts])
     down_ends = np.concatenate([down_ends, d_ends])
@@ -326,7 +398,8 @@ def survey_times(
             dropout_ends = visits.iloc[edges + 1][obs_start_mjd_key].values - 150 / 60 / 60 / 24
 
             dropout_starts = np.concatenate([dropout_starts, np.array([visits.obs_end_mjd.max()])])
-            # If we query during the night, we could have a dropout_start after day_obs_mjd.
+            # If we query during the night, we could have a dropout_start
+            # after day_obs_mjd.
             last_dropout_end = np.array([day_obs_mjd - 0.001])
             if dropout_ends.max() > last_dropout_end:
                 last_dropout_end += 1

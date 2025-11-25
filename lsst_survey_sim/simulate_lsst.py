@@ -318,7 +318,7 @@ def setup_scheduler(
     # Convert opsim visits to ObservationArray and feed the scheduler.
     if initial_opsim is not None and len(initial_opsim) > 0:
         sch_obs = SchemaConverter().opsimdf2obs(initial_opsim)
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             scheduler.add_observations_array(sch_obs)
     return scheduler, initial_opsim, nside
