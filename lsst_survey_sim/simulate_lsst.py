@@ -318,7 +318,7 @@ def setup_scheduler(
     # Convert opsim visits to ObservationArray and feed the scheduler.
     if initial_opsim is not None and len(initial_opsim) > 0:
         sch_obs = SchemaConverter().opsimdf2obs(initial_opsim)
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             scheduler.add_observations_array(sch_obs)
     return scheduler, initial_opsim, nside
@@ -336,15 +336,15 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2025-10-25": ["u", "g", "r", "i", "z"],
         "2025-10-28": ["g", "r", "i", "z", "y"],
         "2025-11-11": ["u", "g", "r", "i", "z"],
-        "2025-11-27": ["g", "r", "i", "z", "y"],
-        "2025-12-10": ["u", "g", "r", "i", "z"],
+        "2025-11-25": ["g", "r", "i", "z", "y"],
+        "2025-12-11": ["u", "g", "r", "i", "z"],
         "2025-12-24": ["g", "r", "i", "z", "y"],
         "2026-01-12": ["u", "g", "r", "i", "z"],
-        "2026-01-26": ["g", "r", "i", "z", "y"],
+        "2026-01-27": ["g", "r", "i", "z", "y"],
         "2026-02-10": ["u", "g", "r", "i", "z"],
         "2026-02-24": ["g", "r", "i", "z", "y"],
-        "2026-03-11": ["u", "g", "r", "i", "z"],
-        "2026-03-25": ["g", "r", "i", "z", "y"],
+        "2026-03-12": ["u", "g", "r", "i", "z"],
+        "2026-03-26": ["g", "r", "i", "z", "y"],
     }
     end_date = Time("2026-03-30T12:00:00")
     band_scheduler = DateSwapBandScheduler(
