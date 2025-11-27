@@ -8,37 +8,33 @@ One option for installation of this package is as follows (note directions for h
 ```
 pip install git+https://github.com/lsst-sims/lsst_survey_sim
 scheduler_download_data --update
-rs_download_data --update --dirs sim_baseline
 ```
 
-The advantage of the above is that you will have the appropriate versions of ts_fbs_utils and rubin_scheduler that should be in use at the summit.
-However, installing this way in the RSP environment is a problem, as almost all of the necessary packages are already installed in the RSP environment and it may not work easily to change the package version.
+The advantage of the above is that you will have the appropriate versions of ts_fbs_utils and rubin_scheduler that should be in use at the summit and it's very relevant for running command-line simulations.
+However, installing this way in the RSP environment is a problem, as almost all of the necessary packages are already installed in the RSP environment and it may not work easily to change the package version. It's also note so suitable for running the notebooks in the 'notebook' directory (a git clone works better for this).
 
-In the RSP, 
+In the RSP or for running with the notebooks:
 ```
 git clone git@github.com:/lsst-sims/lsst_survey_sim.git
 cd lsst_survey_sim
-pip install -e . --no-deps
-
+pip install -e . --no-deps --no-build-isolation
+```
+And then at the USDF RSP:
+```
 os.environ["RUBIN_SIM_DATA_DIR"] = "/sdf/data/rubin/shared/rubin_sim_data"
 ```
-is probably a better choice and will provide access to the necessary scheduler and rubin-sim data.
+or follow the instructions to download the relevant rubin_scheduler and rubin_sim data as above.
 
-Then only requirements for lsst_survey_sims that are not provided in the RSP are ts_fbs_utils and rubin_nights.  In general, installing and using `develop`
+The only required packages for lsst_survey_sims that are not provided in the RSP are ts_fbs_utils.  In general, installing and using `develop`
 of ts-fbs-utils is fairly safe for new simulations, but checking the version in the lsst-survey-sims dependencies can be helpful. Either of
 ```
-pip install git+https://github.com/lsst-ts/ts_fbs_utils
-pip install git+https://github.com/lsst-sims/rubin_nights
+pip install --user git+https://github.com/lsst-ts/ts_fbs_utils
 ```
 or 
 ```
 git clone git@github.com:lsst-ts/ts_fbs_utils.git
 cd ts_fbs_utils
-pip install -e . --no-deps
-cd .. 
-git clone git@github.com:lsst-sims/rubin_nights.git
-cd rubin_nights
-pip install -e . --no-deps
+pip install -e . --no-deps --no-build-isolation
 ```
 are suitable.
 
@@ -47,11 +43,7 @@ The configurations for the FBS are kept in [ts_config_scheduler](https://github.
 git clone git@github.com:lsst-ts/ts_config_scheduler.git
 ```
 or will be cloned for you when running the demo notebook. 
-In general, ts-config-scheduler should be poitned to the current run branch, which changes every few weeks.
-The run branch can be found in JIRA with a query like: 
-"Summary ~ "Support Summit Observing Weeks" and status not in (DONE, Invalid) order by duedate ASC"
-(and often looks like the ticket branch starting with DM- that has the highest number)
-or is tracked in the lsst.obsenv.run_branch topic. 
+In general, ts_config_scheduler can be pointed to the tip of develop; sometimes a temporary run branch is deployed for patches during the night. 
 
 An example of running a simulation is shown in `notebooks/lsst_eval.ipynb`.
-
+A notebook similar to this is available in [Times Square](https://usdf-rsp.slac.stanford.edu/times-square/github/lsst/schedview_notebooks/prenight/run_sim).
