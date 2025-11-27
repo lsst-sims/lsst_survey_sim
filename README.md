@@ -11,7 +11,8 @@ scheduler_download_data --update
 ```
 
 The advantage of the above is that you will have the appropriate versions of ts_fbs_utils and rubin_scheduler that should be in use at the summit and it's very relevant for running command-line simulations.
-However, installing this way in the RSP environment is a problem, as almost all of the necessary packages are already installed in the RSP environment and it may not work easily to change the package version. It's also note so suitable for running the notebooks in the 'notebook' directory (a git clone works better for this).
+
+When running in the RSP, or if you want to access the notebooks in the 'notebook' directory - using git clone works better.
 
 In the RSP or for running with the notebooks:
 ```
@@ -37,6 +38,8 @@ cd ts_fbs_utils
 pip install -e . --no-deps --no-build-isolation
 ```
 are suitable.
+
+It is possible that in the RSP the version of rubin_scheduler could not match the summit. Most of the time this will be fine; adding a pip installed editable version of rubin_scheduler is also possible however. 
 
 The configurations for the FBS are kept in [ts_config_scheduler](https://github.com/lsst-ts/ts_config_scheduler) which can be independently cloned
 ```
