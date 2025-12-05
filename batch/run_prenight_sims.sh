@@ -8,7 +8,7 @@
 #SBATCH --ntasks=1                      # Number of tasks run in parallel
 #SBATCH --cpus-per-task=1               # Number of CPUs per task
 #SBATCH --mem=8G                       # Requested memory
-#SBATCH --time=1:30:00                 # Wall time (hh:mm:ss)
+#SBATCH --time=2:30:00                 # Wall time (hh:mm:ss)
 
 echo "******** START of run_prenight_sims.sh **********"
 
@@ -109,7 +109,39 @@ make_band_scheduler band_scheduler.p
 OPSIM_RESULT_DIR=${WORK_DIR}/opsim_results
 mkdir ${OPSIM_RESULT_DIR}
 
-echo "Running nominal LSST simulation"
+echo "Running nominal LSST simulation without rewards"
+OPSIMRUN="prenight_nominal_noreward_$(date --iso=s)"
+LABEL="Nominal start and overhead, ideal conditions, run at $(date --iso=s)"
+date --iso=s
+run_lsst_sim scheduler.p observatory.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
+  --label "${LABEL}" \
+  --delay 0 --anom_overhead_scale 0 \
+  --results ${OPSIM_RESULT_DIR}
+
+echo "Creating entry in metadatdata database"
+date --iso=s
+SIM_UUID=$(vseqarchive record-visitseq-metadata \
+    simulations \
+    ${OPSIM_RESULT_DIR}/opsim.db \
+    "${LABEL}" \
+    --first_day_obs ${DAYOBS} \
+    --last_day_obs ${LAST_DAYOBS}
+    )
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
+
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
+vseqarchive tag ${SIM_UUID} prenight ideal nominal
+
+# Update the index here to make sure it has at least
+# the completed nominal simulation, even if something in the rest
+# of this job fails.
+for DAYOBS_TO_INDEX in ${DAYOBS_SIMULATED}; do
+  vseqarchive make-prenight-index ${DAYOBS_TO_INDEX} simonyi
+done
+
+echo "Running nominal LSST simulation with rewards"
 OPSIMRUN="prenight_nominal_$(date --iso=s)"
 LABEL="Nominal start and overhead, ideal conditions, run at $(date --iso=s)"
 date --iso=s
@@ -133,7 +165,7 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHT
 vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
-vseqarchive tag ${SIM_UUID} prenight ideal nominal
+vseqarchive tag ${SIM_UUID} prenight ideal nominal rewards
 
 CONDA_HASH=$(vseqarchive record-conda-env)
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -143,68 +175,73 @@ vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
 rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
-for DELAY in 60 240 ; do
-  echo "Running SV simulation delayed ${DELAY}"
-  OPSIMRUN="prenight_delay${DELAY}_$(date --iso=s)"
-  LABEL="Start time delayed by ${DELAY} minutes, nominal slew and visit overhead, ideal conditions, run at $(date --iso=s)"
-  date --iso=s
-  run_lsst_sim scheduler.p observatory.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
-    --keep_rewards --label "${LABEL}" \
-    --delay ${DELAY} --anom_overhead_scale 0 \
-    --results ${OPSIM_RESULT_DIR}
-
-  SIM_UUID=$(vseqarchive record-visitseq-metadata \
-      simulations \
-      ${OPSIM_RESULT_DIR}/opsim.db \
-      "${LABEL}" \
-      --first_day_obs ${DAYOBS} \
-      --last_day_obs ${LAST_DAYOBS}
-      )
-  vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
-  vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
-  vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
-  vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
-  vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
-  vseqarchive tag ${SIM_UUID} prenight ideal delay_${DELAY}
-  vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
-  vseqarchive get-file ${SIM_UUID} visits visits.h5
-  vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
-
-  rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+# Update the index here to make so that if the prenight
+# report gets updated, it can see this simulation even
+# if the ones that follow fail.
+for DAYOBS_TO_INDEX in ${DAYOBS_SIMULATED}; do
+  vseqarchive make-prenight-index ${DAYOBS_TO_INDEX} simonyi
 done
 
-ANOM_SCALE="0.1"
-for ANOM_SEED in 101 102 ; do
-  echo "Running SV simulation with anomalous overhead seed ${ANOM_SEED}"
-  OPSIMRUN="prenight_anom${ANOM_SEED}_$(date --iso=s)"
-  LABEL="Anomalous overhead (${ANOM_SEED}, ${ANOM_SCALE}), nominal start, ideal conditions, run at $(date --iso=s)"
-  date --iso=s
-  run_lsst_sim scheduler.p observatory.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
-    --keep_rewards --label "${LABEL}" \
-    --delay 0 \
-    --anom_overhead_scale ${ANOM_SCALE} \
-    --anom_overhead_seed ${ANOM_SEED} \
-    --results ${OPSIM_RESULT_DIR}
+DELAY=240
+echo "Running SV simulation delayed ${DELAY}"
+OPSIMRUN="prenight_delay${DELAY}_$(date --iso=s)"
+LABEL="Start time delayed by ${DELAY} minutes, nominal slew and visit overhead, ideal conditions, run at $(date --iso=s)"
+date --iso=s
+run_lsst_sim scheduler.p observatory.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
+  --label "${LABEL}" \
+  --delay ${DELAY} --anom_overhead_scale 0 \
+  --results ${OPSIM_RESULT_DIR}
 
-  SIM_UUID=$(vseqarchive record-visitseq-metadata \
-      simulations \
-      ${OPSIM_RESULT_DIR}/opsim.db \
-      "${LABEL}" \
-      --first_day_obs ${DAYOBS} \
-      --last_day_obs ${LAST_DAYOBS}
-      )
-  vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
-  vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
-  vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
-  vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
-  vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
-  vseqarchive tag ${SIM_UUID} prenight ideal anomalous_overhead
-  vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
-  vseqarchive get-file ${SIM_UUID} visits visits.h5
-  vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
+SIM_UUID=$(vseqarchive record-visitseq-metadata \
+    simulations \
+    ${OPSIM_RESULT_DIR}/opsim.db \
+    "${LABEL}" \
+    --first_day_obs ${DAYOBS} \
+    --last_day_obs ${LAST_DAYOBS}
+    )
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
+vseqarchive tag ${SIM_UUID} prenight ideal delay_${DELAY}
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
+vseqarchive get-file ${SIM_UUID} visits visits.h5
+vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
-  rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
-done
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+
+
+ANOM_SCALE="10.0"
+ANOM_SEED=101
+echo "Running SV simulation with anomalous overhead seed ${ANOM_SEED}"
+OPSIMRUN="prenight_anom${ANOM_SEED}_$(date --iso=s)"
+LABEL="Anomalous overhead (${ANOM_SEED}, ${ANOM_SCALE}), nominal start, ideal conditions, run at $(date --iso=s)"
+date --iso=s
+run_lsst_sim scheduler.p observatory.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
+  --label "${LABEL}" \
+  --delay 0 \
+  --anom_overhead_scale ${ANOM_SCALE} \
+  --anom_overhead_seed ${ANOM_SEED} \
+  --results ${OPSIM_RESULT_DIR}
+
+SIM_UUID=$(vseqarchive record-visitseq-metadata \
+    simulations \
+    ${OPSIM_RESULT_DIR}/opsim.db \
+    "${LABEL}" \
+    --first_day_obs ${DAYOBS} \
+    --last_day_obs ${LAST_DAYOBS}
+    )
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
+vseqarchive tag ${SIM_UUID} prenight ideal anomalous_overhead
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
+vseqarchive get-file ${SIM_UUID} visits visits.h5
+vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
+
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+
 
 rm observatory.p scheduler.p
 
