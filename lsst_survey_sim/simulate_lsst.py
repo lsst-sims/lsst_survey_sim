@@ -4,6 +4,7 @@ import os
 import pickle
 import sqlite3
 import subprocess
+import time
 import warnings
 from typing import Any
 
@@ -13,6 +14,7 @@ import healpy as hp
 import numpy as np
 import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
+import rubin_nights.lfa_data as rn_lfa
 import rubin_nights.rubin_sim_addons as rn_sim
 from astroplan import Observer
 from astropy.time import Time, TimeDelta
@@ -210,8 +212,7 @@ def fetch_too_events(t_start: Time, t_end: Time, site: str = "base") -> list[Tar
                 LOGGER.error(f"Could not convert timestamp {a.event_trigger_timestamp}")
                 return None
             too = TargetoO(
-                # tooid=a.source, # is what I'd like to do
-                tooid=a.counter,
+                tooid=a.source,
                 footprint=reward_map,
                 ra_rad_center=ra_rad_center,
                 dec_rad_center=dec_rad_center,
@@ -335,6 +336,44 @@ def setup_scheduler(
             warnings.simplefilter("always")
             scheduler.add_observations_array(sch_obs)
     return scheduler, initial_opsim, nside
+
+
+def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreScheduler, Conditions, int]:
+    """Set up the survey scheduler from a snapshot.
+
+    Fetches the most recent snapshot before `time`.
+
+
+    Parameters
+    ----------
+    time
+        Search for the most recent snapshot from MAINTEL queue,
+        prior to `time`.
+    site
+        Which EFD and S3 site to query and fetch the snapshot from.
+        Typically "usdf" but could be "summit".
+
+    Returns
+    -------
+    scheduler : `CoreScheduler`
+    summit_conditions : `Conditions`
+    nside : `int`
+    """
+    efd_client = InfluxQueryClient(site)
+    topic = "lsst.sal.Scheduler.logevent_largeFileObjectAvailable"
+    snapshots = efd_client.select_top_n(topic, ["url"], num=1, time_cut=time, index=1)
+    uri = snapshots["url"].iloc[-1]
+    LOGGER.info(f"Fetching snapshot {uri} from {site}")
+    if site == "summit":
+        at_usdf = False
+    else:
+        at_usdf = True
+    scheduler, summit_conditions = rn_lfa.get_scheduler_snapshot(uri, at_usdf=at_usdf)
+    # Check that these are the right kind of things
+    assert isinstance(scheduler, CoreScheduler)
+    assert isinstance(summit_conditions, Conditions)
+    nside = scheduler.nside
+    return scheduler, summit_conditions, nside
 
 
 def setup_band_scheduler() -> DateSwapBandScheduler:
