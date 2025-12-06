@@ -11,7 +11,7 @@ from astropy.time import Time, TimeDelta
 from erfa import ErfaWarning
 from rubin_nights import connections
 from rubin_nights.augment_visits import augment_visits
-from rubin_scheduler.scheduler.model_observatory import ModelObservatory
+from rubin_scheduler.scheduler.model_observatory import ModelObservatory, tma_movement
 from rubin_scheduler.scheduler.utils import (
     ObservationArray,
     SchemaConverter,
@@ -33,6 +33,7 @@ __all__ = [
     "survey_footprint",
     "survey_times",
     "setup_observatory_summit",
+    "setup_observatory_simulation",
     "save_opsim",
 ]
 
@@ -604,6 +605,72 @@ def setup_observatory_summit(
     )
     observatory.setup_camera(band_changetime=120, readtime=3.07)
 
+    return observatory
+
+
+def setup_observatory_simulation(
+    survey_info: dict,
+    seeing: float | str | None = None,
+    add_clouds: bool = False,
+    too_server: SimTargetooServer | None = None,
+) -> ModelObservatory:
+    """Configure a `summit-10` model observatory.
+    This approximates average summit performance at present.
+
+    Parameters
+    ----------
+    survey_info
+        The survey_info dictionary returned by `survey_times`.
+        Note that the survey_info carries the downtime information,
+        as well as the survey_start information.
+    seeing
+        If specified as a float, then the constant seeing model will be used.
+        If specified as string, this will be used as the seeing database path.
+        If None, the standard model seeing database will be used.
+    add_clouds
+        If True, use our standard cloud downtime model.
+        If False, use the 'ideal' cloud model resulting in no downtime.
+    too_server
+        A `SimTargetooServer` wrapping a list of TargetoO
+        (target of opportunity) events.
+
+    Returns
+    -------
+    model_observatory
+        ModelObservatory complete with seeing model, cloud (weather downtime)
+        model, and also downtimes (due to engineering).
+    """
+    seeing_data = None
+    seeing_db = None
+    if seeing is not None:
+        if isinstance(seeing, (float, int)):
+            seeing_data = ConstantSeeingData()
+            seeing_data.fwhm_500 = seeing
+        else:
+            seeing_db = seeing
+    # Potentially a bigger system contribution
+    seeing_model = SeeingModel()
+
+    if add_clouds:
+        cloud_data = None
+    else:
+        cloud_data = "ideal"
+
+    observatory = ModelObservatory(
+        nside=survey_info["nside"],
+        mjd=survey_info["survey_start"].mjd,
+        mjd_start=survey_info["survey_start"].mjd,
+        cloud_data=cloud_data,
+        seeing_data=seeing_data,
+        seeing_db=seeing_db,
+        wind_data=None,
+        downtimes=survey_info["downtimes"],
+        sim_to_o=too_server,
+    )
+    observatory.seeing_model = seeing_model
+    tma_performance = tma_movement(40)
+    observatory.setup_telescope(**tma_performance)
+    observatory.setup_camera(band_changetime=140, readtime=3.07)
     return observatory
 
 
