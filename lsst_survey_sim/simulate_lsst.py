@@ -377,6 +377,7 @@ def setup_observatory(
     real_downtime: bool = False,
     initial_opsim: pd.DataFrame | None = None,
     too_server: SimTargetooServer | None = None,
+    baseline_observatory: bool = False,
 ) -> tuple[ModelObservatory, dict]:
     """Set up the model observatory.
 
@@ -422,6 +423,9 @@ def setup_observatory(
     too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
+    baseline_observatory
+        If True, set up an observatory to mimic baseline_v5.1 simulation.
+        If False (default), set up an observatory to mimic summit performance.
 
     Returns
     -------
@@ -446,9 +450,19 @@ def setup_observatory(
     survey_info.update(lsst_support.survey_footprint(nside=nside))
 
     # Now that we have downtime, set up model observatory.
-    observatory = lsst_support.setup_observatory_summit(
-        survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
-    )
+    if baseline_observatory:
+        # Now that we have downtime, set up model observatory.
+        observatory = lsst_support.setup_observatory_simulation(
+            survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
+        )
+        LOGGER.info("Set up baseline observatory.")
+    else:
+        # summit observatory
+        observatory = lsst_support.setup_observatory_summit(
+            survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
+        )
+        LOGGER.info("Set up summit observatory.")
+
     return observatory, survey_info
 
 
