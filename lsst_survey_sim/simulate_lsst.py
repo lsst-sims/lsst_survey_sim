@@ -119,16 +119,25 @@ def fetch_previous_visits(
     endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
     consdb = endpoints["consdb"]
 
+    t0 = time.time()
     instrument = "lsstcam"
     query = (
         f"select v.*, q.* from cdb_{instrument}.visit1 as v "
         f"left join cdb_{instrument}.visit1_quicklook as q "
         f"on v.visit_id = q.visit_id "
         f"where v.day_obs < {day_obs} "
-        f"and v.science_program = 'BLOCK-407' or v.science_program = 'BLOCK-408'"
+        "and v.science_program = 'BLOCK-407' "
+        "or v.science_program = 'BLOCK-408' "
+        "or v.science_program = 'BLOCK-416' "
+        # These aren't really science visits but are part of an FBS config.
+        "or v.science_program = 'BLOCK-T630' "
     )
     visits = consdb.query(query)
+    LOGGER.info(f"Fetched {len(visits)} good visits.")
+    t1 = time.time()
+    LOGGER.debug(f"Query to fetch previous visits: {t1-t0} seconds.")
     if len(visits) > 0:
+        t0 = time.time()
         # Augment visits adds some additional columns.
         visits = augment_visits.augment_visits(visits, instrument)
         # Remove known bad visits.
@@ -142,7 +151,8 @@ def fetch_previous_visits(
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
             visits.loc[:, "note"] = visits.loc[:, "scheduler_note"].copy()
-        LOGGER.info(f"Fetched {len(visits)} good visits.")
+        t1 = time.time()
+        LOGGER.debug(f"Augmenting and converting previous visits: {t1-t0} seconds.")
     else:
         visits = None
     return visits
@@ -270,7 +280,10 @@ def setup_scheduler(
     initial_opsim : `pd.DataFrame`
     nside : `int`
     """
-    # Run the ddf config
+    # Run the ddf config - spawns subprocess
+    # as the DDF scripts are intended to be run from the command line and
+    # weren't written with a separate 'main' function (and the hash of
+    # the file matters).
     if config_ddf_script_path is not None:
         # Run the DDF configuration
         result = subprocess.run(config_ddf_script_path, capture_output=True)
