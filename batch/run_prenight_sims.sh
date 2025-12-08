@@ -134,6 +134,8 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHE
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal
 
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+
 # Update the index here to make sure it has at least
 # the completed nominal simulation, even if something in the rest
 # of this job fails.
@@ -241,7 +243,6 @@ vseqarchive get-file ${SIM_UUID} visits visits.h5
 vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
 rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
-
 
 rm observatory.p scheduler.p
 
