@@ -24,13 +24,30 @@ fi
 
 date --iso=s
 
+# The gate files provide a mechanism that scheduler group members
+# can use to stop this script from running, so if a cron job is
+# running it it can still be stopped when the owner is not
+# available.
+# This is accomplished by deleting the gate file
+# with the name of the owner of the cron job.
+CRONGATE=/sdf/data/rubin/shared/scheduler/cron_gates/run_prenight_sims/${USER}
+if test ! -e ${CRONGATE} ; then
+    echo "Aborting because ${CRONGATE} does not exist."
+    echo "See /sdf/data/rubin/shared/scheduler/cron_gates/README.txt"
+    exit 1
+fi
+
 set -o xtrace
+
+newgrp rubin_users
+SCHEDULER_GROUP_USERS="lynnej neilsen yoachim"
 
 export AWS_PROFILE=prenight
 WORK_DATE=$(date '+%Y-%m-%dT%H%M%S' --utc)
 WORK_DIR="/sdf/data/rubin/shared/scheduler/prenight/work/run_prenight_sims/${WORK_DATE}"
 echo "Working in $WORK_DIR"
 mkdir ${WORK_DIR}
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rwX ${WORK_DIR} ; done
 cd ${WORK_DIR}
 
 # Install required python packages in a new venv
@@ -84,6 +101,7 @@ export VSARCHIVE_PGSCHEMA="vsmd"
 echo "Fetching completed visits"
 date --iso=s
 fetch_lsst_visits ${DAYOBS} completed_visits.db ~/.lsst/usdf_access_token
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw completed_visits.db ; done
 
 # Recording hash of fetched visits
 COMPLETED=$(vseqarchive record-visitseq-metadata \
@@ -96,18 +114,22 @@ COMPLETED=$(vseqarchive record-visitseq-metadata \
 echo "Creating scheduler pickle"
 date --iso=s
 make_lsst_scheduler scheduler.p --opsim completed_visits.db --config_script ${SCHED_CONFIG_FNAME}
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw scheduler.p ; done
 
 echo "Creating model observatory"
 date --iso=s
 make_model_observatory observatory.p
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
 
 echo "Creating the band scheduler"
 date --iso=s
 make_band_scheduler band_scheduler.p
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw band_scheduler.p ; done
 
 # make dir for output
 OPSIM_RESULT_DIR=${WORK_DIR}/opsim_results
 mkdir ${OPSIM_RESULT_DIR}
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rwX ${OPSIM_RESULT_DIR} ; done
 
 echo "Running nominal LSST simulation without rewards"
 OPSIMRUN="prenight_nominal_noreward_$(date --iso=s)"
