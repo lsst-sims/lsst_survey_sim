@@ -55,7 +55,7 @@ cd ${WORK_DIR}
 # but we need a python in the path to create the
 # venv to begin with, so we source loadLSST.sh.
 source /sdf/group/rubin/sw/w_latest/loadLSST.sh
-PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/n/${USER}/prenight_venvs/prenight-${WORK_DATE}-XXXXXX)
+PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/${USER:0:1}/${USER}/prenight_venvs/prenight-${WORK_DATE}-XXXXXX)
 python -m venv "${PRENIGHT_VENV}"
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
 source "${PRENIGHT_VENV}/bin/activate"
