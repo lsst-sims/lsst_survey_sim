@@ -10,7 +10,9 @@ import rubin_nights.dayobs_utils as rn_dayobs
 from astropy.time import Time, TimeDelta
 from erfa import ErfaWarning
 from rubin_nights import connections
+from rubin_nights import observatory_status
 from rubin_nights.augment_visits import augment_visits
+from rubin_nights.influx_query import InfluxQueryClient
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory, tma_movement
 from rubin_scheduler.scheduler.utils import (
     ObservationArray,
@@ -70,8 +72,12 @@ def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     next_day_obs_time = rn_dayobs.day_obs_to_time(day_obs) + TimeDelta(1, format="jd")
     next_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(next_day_obs_time))
 
+    # End day of sim
+    end_day_obs_time = rn_dayobs.day_obs_to_time(day_obs) + TimeDelta(sim_nights, format="jd")
+    end_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(end_day_obs_time))
+
     # Some parameters relating to downtime setup for model observatory
-    day_downtime = day_obs
+    downtime_start = day_obs
     if sim_nights <= 2:
         # One or two nights, probably no downtime or clouds.
         add_downtime = False
@@ -99,7 +105,8 @@ def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     sim_flags = {
         "day_obs": day_obs,
         "next_day_obs": next_day_obs,
-        "day_obs_downtime": day_downtime,
+        "end_day_obs": end_day_obs,
+        "downtime_start_day_obs": downtime_start,
         "today_day_obs": today_day_obs,
         "add_downtime": add_downtime,
         "real_downtime": real_downtime,
@@ -137,11 +144,11 @@ def survey_footprint(
 def survey_times(
     random_seed: int = 55,
     minutes_after_sunset12: float = 0,
-    early_dome_closure: float = 1.0,
+    early_dome_closure: float = 0,
     add_downtime: bool = True,
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
-    day_obs: int | None = None,
+    downtime_start_day_obs: int | None = None,
     new_downtime_ndays: float = 100.0,
     tokenfile: str | None = None,
     site: str = "usdf",
@@ -153,7 +160,7 @@ def survey_times(
     Because the up/downtime could be expensive to calculate (since it
     involves masking the last hour before sunrise), specify
     `sim_length` to be the time for the desired simulation (and end
-    of the calculated downtimes). This will start at day_obs.
+    of the calculated downtimes). This will start at downtime_dayobs_start.
 
     Parameters
     ----------
@@ -167,10 +174,9 @@ def survey_times(
         In practice, this tends to be about 30 or 40 minutes at the moment.
     early_dome_closure
         Close the dome (start downtime) `early_dome_closure` hours before
-        0-degree sunrise. A closure 1.0hour before sunrise aligns with
-        current operational guidelines (-12 degree twilight) as of Dec 2025.
-        In hours. (note that sim_runner's ModelObservatory will also stop
-        at a pre-determined sun altitude).
+        (or after) -12-degree sunrise. (as of Dec 2025, dome closure is -12).
+        In hours. Note that sim_runner's ModelObservatory will also stop
+        at a pre-determined sun altitude.
     add_downtime
         If False, do not add unscheduled downtime - this still adds early
         dome closure from day_obs to downtime_ndays.
@@ -189,8 +195,8 @@ def survey_times(
     visits
         Option to pass in the visits from the consdb, instead of querying
         directly. Only needed if real_downtime is True.
-    day_obs
-        Start simulating downtime in this module on day_obs, and run
+    downtime_start_day_obs
+        Start simulating downtime in this module on downtime_start_day_obs, and run
         simulation to day_obs + downtime_ndays.
     new_downtime_ndays
         Generate downtime values from day_obs to day_obs + downtime_ndays.
@@ -215,7 +221,7 @@ def survey_times(
 
     survey_start = Time(SURVEY_START_MJD, format="mjd", scale="utc")
     # Time limits for simulating downtime HERE
-    downtime_start = rn_dayobs.day_obs_to_time(day_obs)
+    downtime_start = rn_dayobs.day_obs_to_time(downtime_start_day_obs)
     if downtime_start < survey_start:
         survey_start = downtime_start
     downtime_length = TimeDelta(new_downtime_ndays, format="jd")
@@ -233,6 +239,7 @@ def survey_times(
     alm_start = np.where(abs(almanac.sunsets["sunset"] - count_start.mjd) < 0.5)[0][0]
     alm_end = np.where(abs(almanac.sunsets["sunset"] - downtime_end.mjd) < 0.5)[0][0]
     sunsets = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
+    sunrises = almanac.sunsets[alm_start:alm_end]["sun_n12_rising"]
     actual_sunsets = almanac.sunsets[alm_start:alm_end]["sunset"]
     actual_sunrises = almanac.sunsets[alm_start:alm_end]["sunrise"]
 
@@ -247,10 +254,10 @@ def survey_times(
     }
 
     # Add time limits and downtime
-    # early_dome_closure is the time ahead of 0-deg sunrise to close
+    # early_dome_closure is the time ahead of 12-deg sunrise to close
 
     # Always add dome_closure during downtime_start to downtime_end
-    down_starts = actual_sunrises - early_dome_closure / 24
+    down_starts = sunrises - early_dome_closure / 24
     down_ends = actual_sunrises
 
     # And we might as well throw in being slow on sky
@@ -371,18 +378,23 @@ def survey_times(
 
     # Replace downtime before now, if real_downtime
     if add_downtime and real_downtime:
-        if day_obs is None:
-            day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(Time.now()))
-        day_obs_mjd = rn_dayobs.day_obs_to_time(day_obs).mjd
+        if downtime_start_day_obs is None:
+            downtime_start_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(Time.now()))
+        day_obs_mjd = rn_dayobs.day_obs_to_time(downtime_start_day_obs).mjd
         if visits is None:
             # Fetch the visits if not already provided
             endpoints = connections.get_clients(tokenfile, site)
             query = (
                 "select *, q.* from cdb_lsstcam.visit1 left join cdb_lsstcam.visit1_quicklook as q "
                 "on visit1.visit_id = q.visit_id "
-                "where science_program = 'BLOCK-407' and visit1.day_obs < {day_obs}"
+                f"where "
+                f"(science_program = 'BLOCK-407' "
+                f"or science_program = 'BLOCK-408' "
+                f"or science_program = 'BLOCK-416' "
+                f"or science_program = 'BLOCK-417') and "
+                f"visit1.day_obs <= {downtime_start_day_obs}"
             )
-            visits = endpoints["consdb"].query(query)
+            visits = endpoints["consdb_tap"].query(query)
             visits = augment_visits(visits, "lsstcam")
 
         survey_info["consdb_visits"] = visits
@@ -540,9 +552,10 @@ def setup_observatory_summit(
     seeing: float | str | None = None,
     add_clouds: bool = False,
     too_server: SimTargetooServer | None = None,
+    time_setup: Time | None = None,
 ) -> ModelObservatory:
-    """Configure a `summit-10` model observatory.
-    This approximates average summit performance at present.
+    """Configure a model observatory matching the velocity/acceleration/jerk
+    parameters at `time_setup`.
 
     Parameters
     ----------
@@ -560,6 +573,9 @@ def setup_observatory_summit(
     too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
+    time_setup
+        The Time at which to consider the observatory TMA configuration.
+        If None, uses 20% velocity/acceleration/jerk settings.
 
     Returns
     -------
@@ -595,16 +611,29 @@ def setup_observatory_summit(
         sim_to_o=too_server,
     )
     observatory.seeing_model = seeing_model
-    # "10 percent TMA" - but this is a label from the summit, not 10% in all
-    observatory.setup_telescope(
-        azimuth_maxspeed=1.0,
-        azimuth_accel=1.0,
-        azimuth_jerk=4.0,
-        altitude_maxspeed=4.0,
-        altitude_accel=1.0,
-        altitude_jerk=4.0,
-        settle_time=3.45,  # more like current settle average
-    )
+    # "20 percent TMA" - but this is a label from the summit, not 20% in all
+    if time_setup is None:
+        observatory.setup_telescope(
+            azimuth_maxspeed=2.0,
+            azimuth_accel=2.0,
+            azimuth_jerk=8.0,
+            altitude_maxspeed=2.0,
+            altitude_accel=2.0,
+            altitude_jerk=8.0,
+            settle_time=3.45,  # more like current settle average
+        )
+        logger.info("Setting up summit observatory as summit-20")
+    else:
+        efd_client = InfluxQueryClient("usdf")
+        tma = observatory_status.get_tma_limits(
+            time_setup, time_setup + TimeDelta(1 / 24, format="jd"), efd_client
+        )
+        tma_performance = dict(tma.iloc[-1])
+        tma_performance["settle_time"] = 3.45
+        observatory.setup_telescope(**tma_performance)
+        logger.info(
+            f"Setting up summit observatory with altitude_maxspeed {tma_performance['altitude_maxspeed']}"
+        )
     observatory.setup_camera(band_changetime=120, readtime=3.07)
 
     return observatory
