@@ -136,8 +136,8 @@ def survey_footprint(
 
 def survey_times(
     random_seed: int = 55,
-    minutes_after_sunset12: float = 30,
-    early_dome_closure: float = 1.6,
+    minutes_after_sunset12: float = 0,
+    early_dome_closure: float = 1.0,
     add_downtime: bool = True,
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
@@ -167,8 +167,10 @@ def survey_times(
         In practice, this tends to be about 30 or 40 minutes at the moment.
     early_dome_closure
         Close the dome (start downtime) `early_dome_closure` hours before
-        0-degree sunrise. A closure 1.6 hour before sunrise aligns with
-        current operational guidelines (-18 degree twilight). In hours.
+        0-degree sunrise. A closure 1.0hour before sunrise aligns with
+        current operational guidelines (-12 degree twilight) as of Dec 2025.
+        In hours. (note that sim_runner's ModelObservatory will also stop
+        at a pre-determined sun altitude).
     add_downtime
         If False, do not add unscheduled downtime - this still adds early
         dome closure from day_obs to downtime_ndays.
