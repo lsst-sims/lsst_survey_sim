@@ -119,7 +119,7 @@ def fetch_previous_visits(
     """
     # Get the survey visits from the ConsDB.
     endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
-    consdb = endpoints["consdb"]
+    consdb = endpoints["consdb_tap"]
 
     t0 = time.time()
     instrument = "lsstcam"
@@ -131,6 +131,7 @@ def fetch_previous_visits(
         "and v.science_program = 'BLOCK-407' "
         "or v.science_program = 'BLOCK-408' "
         "or v.science_program = 'BLOCK-416' "
+        "or v.science_program = 'BLOCK-417' "
         # These aren't really science visits but are part of an FBS config.
         "or v.science_program = 'BLOCK-T630' "
     )
@@ -423,7 +424,8 @@ def setup_observatory(
     Parameters
     ----------
     day_obs
-        The day_obs to start generating (extra) downtime for the observatory.
+        The day_obs of the start of the simulation.
+        Also, the day_obs to start generating (extra) downtime.
     nside
         The HEALpix nside value for the model observatory and scheduler.
     add_downtime
@@ -442,16 +444,6 @@ def setup_observatory(
         For full simulations, this should be None.
         For prenight simulations - it depends. If we have an estimate
         of the seeing expected for the night, it may be useful to set a value.
-    opsim_filename
-        Get previous visits from a file, instead of directly from
-        the ConsDB. If set, then consdb will not be queried.
-    tokenfile
-        Path to the RSP tokenfile.
-        See also `rubin_nights.connections.get_access_token`.
-        Default None will use `ACCESS_TOKEN` environment variable.
-    site
-        The site (`usdf`, `usdf-dev`, `summit` ..) location at
-        which to query services. Must match tokenfile origin.
     real_downtime
         A boolean flag to determine whether to rewrite the downtime
         within the range of initial_opsim into the actual uptime for visits
@@ -477,7 +469,7 @@ def setup_observatory(
             raise ValueError("If real_downtime is True, initial_opsim must be provided.")
 
     survey_info = lsst_support.survey_times(
-        day_obs=day_obs,
+        downtime_start_day_obs=day_obs,
         add_downtime=add_downtime,
         real_downtime=real_downtime,
         visits=initial_opsim,
@@ -498,7 +490,11 @@ def setup_observatory(
     else:
         # summit observatory
         observatory = lsst_support.setup_observatory_summit(
-            survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
+            survey_info,
+            seeing=seeing,
+            add_clouds=add_clouds,
+            too_server=too_server,
+            time_setup=rn_dayobs.day_obs_to_time(day_obs),
         )
         LOGGER.info("Set up summit observatory.")
 
