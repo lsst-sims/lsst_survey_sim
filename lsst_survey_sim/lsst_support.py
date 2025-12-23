@@ -150,8 +150,6 @@ def survey_times(
     visits: pd.DataFrame | None = None,
     downtime_start_day_obs: int | None = None,
     new_downtime_ndays: float = 100.0,
-    tokenfile: str | None = None,
-    site: str = "usdf",
 ) -> dict:
     """Set up basic LSST survey conditions.
 
@@ -193,22 +191,15 @@ def survey_times(
         It does also give an approximately realistic view of up/down time
         prior to the current date.
     visits
-        Option to pass in the visits from the consdb, instead of querying
-        directly. Only needed if real_downtime is True.
+        Pass in the visits from the consdb.
+        Only needed if real_downtime is True.
     downtime_start_day_obs
         Start simulating downtime in this module on downtime_start_day_obs, and run
         simulation to day_obs + downtime_ndays.
     new_downtime_ndays
         Generate downtime values from day_obs to day_obs + downtime_ndays.
         Use rubin_scheduler.site_models downtime models beyond this.
-    tokenfile
-        Path to the RSP tokenfile.
-        See also `rubin_nights.connections.get_access_token`.
-        Default None will use `ACCESS_TOKEN` environment variable.
-        Only necessary if real_downtime = True and visits = None.
-    site
-        The site (`usdf`, `usdf-dev`, `summit` ..) location at
-        which to query services. Must match tokenfile origin.
+
 
     Returns
     -------
@@ -381,23 +372,7 @@ def survey_times(
         if downtime_start_day_obs is None:
             downtime_start_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(Time.now()))
         day_obs_mjd = rn_dayobs.day_obs_to_time(downtime_start_day_obs).mjd
-        if visits is None:
-            # Fetch the visits if not already provided
-            endpoints = connections.get_clients(tokenfile, site)
-            query = (
-                "select *, q.* from cdb_lsstcam.visit1 left join cdb_lsstcam.visit1_quicklook as q "
-                "on visit1.visit_id = q.visit_id "
-                f"where "
-                f"(science_program = 'BLOCK-407' "
-                f"or science_program = 'BLOCK-408' "
-                f"or science_program = 'BLOCK-416' "
-                f"or science_program = 'BLOCK-417') and "
-                f"visit1.day_obs <= {downtime_start_day_obs}"
-            )
-            visits = endpoints["consdb_tap"].query(query)
-            visits = augment_visits(visits, "lsstcam")
 
-        survey_info["consdb_visits"] = visits
         if len(visits) == 0:
             logger.warning("No visits found and looking for real downtime")
         else:
@@ -611,6 +586,22 @@ def setup_observatory_summit(
         sim_to_o=too_server,
     )
     observatory.seeing_model = seeing_model
+
+    if time_setup is not None:
+        try:
+            efd_client = InfluxQueryClient("usdf")
+            tma = observatory_status.get_tma_limits(
+                time_setup, time_setup + TimeDelta(1 / 24, format="jd"), efd_client
+            )
+            tma_performance = dict(tma.iloc[-1])
+            tma_performance["settle_time"] = 3.45
+            observatory.setup_telescope(**tma_performance)
+            logger.info(
+                f"Setting up summit observatory with altitude_maxspeed {tma_performance['altitude_maxspeed']}"
+            )
+        except KeyError:
+            logger.info("USDF EFD not accessible. Using default summit-20.")
+            time_setup = None
     # "20 percent TMA" - but this is a label from the summit, not 20% in all
     if time_setup is None:
         observatory.setup_telescope(
@@ -623,17 +614,7 @@ def setup_observatory_summit(
             settle_time=3.45,  # more like current settle average
         )
         logger.info("Setting up summit observatory as summit-20")
-    else:
-        efd_client = InfluxQueryClient("usdf")
-        tma = observatory_status.get_tma_limits(
-            time_setup, time_setup + TimeDelta(1 / 24, format="jd"), efd_client
-        )
-        tma_performance = dict(tma.iloc[-1])
-        tma_performance["settle_time"] = 3.45
-        observatory.setup_telescope(**tma_performance)
-        logger.info(
-            f"Setting up summit observatory with altitude_maxspeed {tma_performance['altitude_maxspeed']}"
-        )
+
     observatory.setup_camera(band_changetime=120, readtime=3.07)
 
     return observatory
