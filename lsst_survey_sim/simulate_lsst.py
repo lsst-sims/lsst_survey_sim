@@ -90,7 +90,12 @@ def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_con
 
 
 def fetch_previous_visits(
-    day_obs: int, tokenfile: str | None = None, site: str = "usdf", convert_to_opsim: bool = True
+    day_obs: int,
+    tokenfile: str | None = None,
+    site: str = "usdf",
+    convert_to_opsim: bool = True,
+    fetch_with_tap: bool = True,
+    science_programs: list[str] | None = None,
 ) -> pd.DataFrame:
     """Fetch relevant visits from the Consdb.
 
@@ -109,6 +114,13 @@ def fetch_previous_visits(
     convert_to_opsim
         If True, convert to opsim format with rubin_nights.consdb_to_opsim.
         If False, keep in consdb format.
+    fetch_with_tap
+        If True, use the TAP client (not available except at USDF).
+        If False, use the FastAPI client.
+    science_programs
+        If not specified, uses the default series of FBS programs:
+        BLOCK-407, BLOCK-408, BLOCK-416, BLOCK-417 (and BLOCK-T630).
+        An option is provided, if evaluating non-standard FBS configurations.
 
     Returns
     -------
@@ -119,7 +131,10 @@ def fetch_previous_visits(
     """
     # Get the survey visits from the ConsDB.
     endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
-    consdb = endpoints["consdb_tap"]
+    if fetch_with_tap:
+        consdb = endpoints["consdb_tap"]
+    else:
+        consdb = endpoints["consdb"]
 
     t0 = time.time()
     instrument = "lsstcam"
@@ -128,15 +143,17 @@ def fetch_previous_visits(
         f"left join cdb_{instrument}.visit1_quicklook as q "
         f"on v.visit_id = q.visit_id "
         f"where v.day_obs < {day_obs} "
-        "and v.science_program = 'BLOCK-407' "
-        "or v.science_program = 'BLOCK-408' "
-        "or v.science_program = 'BLOCK-416' "
-        "or v.science_program = 'BLOCK-417' "
-        # These aren't really science visits but are part of an FBS config.
-        "or v.science_program = 'BLOCK-T630' "
     )
+    if science_programs is None:
+        science_programs = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-T630"]
+    program_constraint = [f"v.science_program = '{program}' " for program in science_programs]
+    program_constraint = "or ".join(program_constraint)
+    query = query + f" and ({program_constraint})"
+    LOGGER.info(f"Querying for visits in programs {science_programs}")
     visits = consdb.query(query)
-    LOGGER.info(f"Fetched {len(visits)} good visits.")
+    # Throw out a specific subset of bad metadata
+    visits = visits.query("not (science_program == 'BLOCK-417' and img_type == 'acq')")
+    LOGGER.info(f"Fetched {len(visits)} visits.")
     t1 = time.time()
     LOGGER.debug(f"Query to fetch previous visits: {t1-t0} seconds.")
     if len(visits) > 0:
@@ -391,7 +408,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2025-11-11": ["u", "g", "r", "i", "z"],
         "2025-11-25": ["g", "r", "i", "z", "y"],
         "2025-12-09": ["u", "g", "r", "i", "z"],
-        "2025-12-24": ["g", "r", "i", "z", "y"],
+        "2025-12-23": ["g", "r", "i", "z", "y"],
         "2026-01-12": ["u", "g", "r", "i", "z"],
         "2026-01-27": ["g", "r", "i", "z", "y"],
         "2026-02-10": ["u", "g", "r", "i", "z"],
