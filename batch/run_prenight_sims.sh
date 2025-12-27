@@ -73,7 +73,8 @@ pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_S
   psycopg2 \
   botocore \
   boto3 \
-  lsst-resources
+  lsst-resources \
+  "numpy<2.4.0"
 
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
