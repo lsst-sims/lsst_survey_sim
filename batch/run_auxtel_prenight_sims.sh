@@ -74,7 +74,8 @@ pip install \
   psycopg2 \
   botocore \
   boto3 \
-  lsst-resources
+  lsst-resources \
+  "numpy<2.4.0"
 
 if false ; then
   # Get the scheduler version from the EFD and install it.
