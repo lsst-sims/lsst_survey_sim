@@ -9,8 +9,7 @@ import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
 from astropy.time import Time, TimeDelta
 from erfa import ErfaWarning
-from rubin_nights import connections
-from rubin_nights import observatory_status
+from rubin_nights import connections, observatory_status
 from rubin_nights.augment_visits import augment_visits
 from rubin_nights.influx_query import InfluxQueryClient
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory, tma_movement
@@ -149,7 +148,7 @@ def survey_times(
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
     downtime_start_day_obs: int | None = None,
-    new_downtime_ndays: float = 100.0,
+    new_downtime_ndays: float = 200.0,
 ) -> dict:
     """Set up basic LSST survey conditions.
 
@@ -261,13 +260,13 @@ def survey_times(
     # Generate simulated downtime
     if add_downtime:
 
-        # Placeholder if we want to put in known likely upcoming weather
-        # problems for simulations (or nights off for tests)
+        # Placeholder if we want to put in known upcoming weather
+        # problems for simulations (or scheduled maintenance)
         weather_starts: list[Time] = [
-            # Time("2025-08-29T12:00:00", scale="utc"),
+            Time("2026-03-02T12:00:00", scale="utc"),
         ]
         weather_ends: list[Time] = [
-            # Time("2025-09-01T12:00:00", scale="utc"),
+            Time("2026-03-26T12:00:00", scale="utc"),
         ]
 
         # Generate downtimes during downtime_start to downtime_end
@@ -281,12 +280,14 @@ def survey_times(
         # UnscheduledDowntimeMoreY1Data but more frequent + shorter
         random_downtime = 0
         nn = len(night_start)
-        for count in range(5):
-            threshold = 1.0 - (count / 5)
+        for count in range(3):
+            threshold = 1.0 - (count / 4)
             prob_down = rng.random(nn)
-            time_down = rng.gumbel(loc=0.4, scale=1, size=nn)  # hours
+            # Reduced downtime to better match current (20260101) distribution
+            time_down = rng.gumbel(loc=0.3, scale=0.5, size=nn)  # hours
+            time_down = np.where(time_down < 0, 0, time_down)
             # apply probability of having downtime or not -
-            # But always at least 2 minutes
+            # But always at least 2 minutes for each cycle of 'count'
             time_down = np.where(prob_down <= threshold, time_down, 2 / 60 / 24)
             avail_in_night = (night_end - night_start) * 24
             time_down = np.where(time_down >= avail_in_night, avail_in_night, time_down)
@@ -373,7 +374,7 @@ def survey_times(
             downtime_start_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(Time.now()))
         day_obs_mjd = rn_dayobs.day_obs_to_time(downtime_start_day_obs).mjd
 
-        if len(visits) == 0:
+        if visits is None or len(visits) == 0:
             logger.warning("No visits found and looking for real downtime")
         else:
             # Identify gaps/downtime starts
@@ -528,6 +529,8 @@ def setup_observatory_summit(
     add_clouds: bool = False,
     too_server: SimTargetooServer | None = None,
     time_setup: Time | None = None,
+    expected_wait_settle: float | None = None,
+    close_loop_filter_time: float | None = None,
 ) -> ModelObservatory:
     """Configure a model observatory matching the velocity/acceleration/jerk
     parameters at `time_setup`.
@@ -551,6 +554,14 @@ def setup_observatory_summit(
     time_setup
         The Time at which to consider the observatory TMA configuration.
         If None, uses 20% velocity/acceleration/jerk settings.
+    expected_wait_settle
+        The current wait and/or settle time beyond TMA movement expected
+        for the visit gap.
+        Default `None` will use expected performance at `time_setup`.
+    close_loop_filter_time
+        The extra time (in seconds) to add to a filter change to account
+        for close-loop iterations.
+        Default `None` will use expected performance at `time_setup`.
 
     Returns
     -------
@@ -574,6 +585,14 @@ def setup_observatory_summit(
     else:
         cloud_data = "ideal"
 
+    # TODO
+    # create lookup table for expected_wait_settle over time
+    # create lookup table for close_loop_filter_time over time
+    if expected_wait_settle is None:
+        expected_wait_settle = 2.0
+    if close_loop_filter_time is None:
+        close_loop_filter_time = 140.0
+
     observatory = ModelObservatory(
         nside=survey_info["nside"],
         mjd=survey_info["survey_start"].mjd,
@@ -594,7 +613,7 @@ def setup_observatory_summit(
                 time_setup, time_setup + TimeDelta(1 / 24, format="jd"), efd_client
             )
             tma_performance = dict(tma.iloc[-1])
-            tma_performance["settle_time"] = 3.45
+            tma_performance["settle_time"] = expected_wait_settle
             observatory.setup_telescope(**tma_performance)
             logger.info(
                 f"Setting up summit observatory with altitude_maxspeed {tma_performance['altitude_maxspeed']}"
@@ -602,7 +621,7 @@ def setup_observatory_summit(
         except KeyError:
             logger.info("USDF EFD not accessible. Using default summit-20.")
             time_setup = None
-    # "20 percent TMA" - but this is a label from the summit, not 20% in all
+    # "summit-20 TMA" - but this is a label from the summit, not 20% in all
     if time_setup is None:
         observatory.setup_telescope(
             azimuth_maxspeed=2.0,
@@ -611,11 +630,12 @@ def setup_observatory_summit(
             altitude_maxspeed=2.0,
             altitude_accel=2.0,
             altitude_jerk=8.0,
-            settle_time=3.45,  # more like current settle average
+            settle_time=expected_wait_settle,
         )
         logger.info("Setting up summit observatory as summit-20")
 
-    observatory.setup_camera(band_changetime=120, readtime=3.07)
+    # Set up camera with band changetime
+    observatory.setup_camera(band_changetime=120 + close_loop_filter_time, readtime=3.07)
 
     return observatory
 
