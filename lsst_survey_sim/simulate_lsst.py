@@ -42,7 +42,7 @@ CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_blo
 LOGGER = logging.getLogger(__name__)
 
 __all__ = [
-    "get_configuration",
+    "get_config_repo",
     "fetch_previous_visits",
     "fetch_too_events",
     "setup_scheduler",
@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 
-def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
+def get_config_repo(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
     """Git checkout ts_config_scheduler and set it to the desired commit.
 
     `ts_config_scheduler_commit` is fetchable from
@@ -145,7 +145,7 @@ def fetch_previous_visits(
         f"where v.day_obs < {day_obs} "
     )
     if science_programs is None:
-        science_programs = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-T630"]
+        science_programs = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
     program_constraint = [f"v.science_program = '{program}' " for program in science_programs]
     program_constraint = "or ".join(program_constraint)
     query = query + f" and ({program_constraint})"
