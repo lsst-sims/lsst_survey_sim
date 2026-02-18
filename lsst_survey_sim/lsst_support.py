@@ -10,7 +10,6 @@ import rubin_nights.dayobs_utils as rn_dayobs
 from astropy.time import Time, TimeDelta
 from erfa import ErfaWarning
 from rubin_nights import connections, observatory_status
-from rubin_nights.augment_visits import augment_visits
 from rubin_nights.influx_query import InfluxQueryClient
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory, tma_movement
 from rubin_scheduler.scheduler.utils import (
@@ -29,18 +28,21 @@ from rubin_scheduler.site_models import (
 )
 from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 
+"""Module supporting the configuration of simulation inputs."""
+
 __all__ = [
     "set_sim_flags",
     "survey_footprint",
     "survey_times",
     "setup_observatory_summit",
     "setup_observatory_simulation",
+    "SlewScatter",
     "save_opsim",
 ]
 
 astropy.utils.iers.conf.iers_degraded_accuracy = "ignore"
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
@@ -57,7 +59,7 @@ def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     Returns
     -------
     sim_flags :  `dict`
-        Dictionary of day_obs, next_day_obs, today_day_obs,
+        Dictionary of day_obs (today, next day, sim end day)
         and associated flags for setting up the observatory
         (add_downtime, real_downtime, and add_clouds) based on the
         most likely combinations that would be useful given day_obs
@@ -66,8 +68,9 @@ def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     # today_dayobs is the day of today -
     # if it is larger than day_obs, then we are running in the past.
     today_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.today_day_obs())
+    tomorrow_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.tomorrow_day_obs())
 
-    # Knowing the day after day_obs will be useful:
+    # Knowing the day after day_obs can be useful:
     next_day_obs_time = rn_dayobs.day_obs_to_time(day_obs) + TimeDelta(1, format="jd")
     next_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(next_day_obs_time))
 
@@ -76,17 +79,18 @@ def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     end_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(end_day_obs_time))
 
     # Some parameters relating to downtime setup for model observatory
-    downtime_start = day_obs
     if sim_nights <= 2:
         # One or two nights, probably no downtime or clouds.
         add_downtime = False
         real_downtime = False
         add_clouds = False
+        downtime_start = day_obs
     else:
         # Multiple nights, probably want downtime and clouds.
         add_downtime = True
         real_downtime = True
         add_clouds = True
+        downtime_start = day_obs
     # But -- beyond those, if we are running in the PAST,
     # we will want to use the real on-sky time for the FBS visits.
     # This means adding downtime, using the real-downtime,
@@ -94,12 +98,13 @@ def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     # We will also need to be careful about what data we query for
     # and what we add to the FBS.
     if day_obs < today_day_obs:
-        print("Checking the past, will restrict uptime to time acquiring science visits")
+        LOGGER.info("Checking the past, will restrict uptime to time acquiring science visits")
         add_downtime = True
         real_downtime = True
         add_clouds = False
-        # include day_obs info in real_downtime calculation
-        day_downtime = next_day_obs
+        # simulated downtime should start (by default) when real
+        # data likely to end (but not counting tonight)
+        downtime_start = tomorrow_day_obs
 
     sim_flags = {
         "day_obs": day_obs,
@@ -126,7 +131,7 @@ def survey_footprint(
 
     Returns
     -------
-    footprint_arrays : `dict`
+    footprint_arrays : `dict` [`str`, `np.ndarray`]
         A dictionary with various pieces of footprint information.
         `footprint` contains the total footprint weights per band.
         `wfd_fp` is a True/False array of pixels in the WFD regions.
@@ -141,14 +146,15 @@ def survey_footprint(
 
 
 def survey_times(
+    downtime_start_day_obs: int,
+    new_downtime_ndays: float = 365.0,
     random_seed: int = 55,
     minutes_after_sunset12: float = 0,
     early_dome_closure: float = 0,
     add_downtime: bool = True,
     real_downtime: bool = False,
     visits: pd.DataFrame | None = None,
-    downtime_start_day_obs: int | None = None,
-    new_downtime_ndays: float = 200.0,
+    survey_start_mjd: float = SURVEY_START_MJD,
 ) -> dict:
     """Set up basic LSST survey conditions.
 
@@ -161,14 +167,20 @@ def survey_times(
 
     Parameters
     ----------
-    verbose
-        Print information about start/end times and downtime fraction.
+    downtime_start_day_obs
+        Start simulating downtime in this module on downtime_start_day_obs,
+        and add (new) downtime to downtime_start_day_obs + downtime_ndays.
+        Note that the 'real' downtime (from on-sky availability) will
+        be added only for the period before this date.
+    new_downtime_ndays
+        Generate downtime values from day_obs to day_obs + downtime_ndays.
+        Use rubin_scheduler.site_models downtime models beyond this.
     random_seed
         Random value to seed downtimes with
     minutes_after_sunset12
         How long after -12 deg sunset to get on sky, in minutes.
         In theory, this should be 0.
-        In practice, this tends to be about 30 or 40 minutes at the moment.
+        In practice, this tends to be about 10 or 20 minutes at the moment.
     early_dome_closure
         Close the dome (start downtime) `early_dome_closure` hours before
         (or after) -12-degree sunrise. (as of Dec 2025, dome closure is -12).
@@ -176,49 +188,61 @@ def survey_times(
         at a pre-determined sun altitude.
     add_downtime
         If False, do not add unscheduled downtime - this still adds early
-        dome closure from day_obs to downtime_ndays.
-        Appropriate for single-night simulations.
-        If True, add downtime - from day_obs to downtime_ndays, generated
-        here -(includes short downtimes and multiple per night,
+        dome closure and late-start from day_obs to downtime_ndays.
+        If True, add downtime - from downtime_start_day_obs to downtime_ndays,
+        generated here -(includes short downtimes and multiple per night,
         as well as early dome closures); beyond day_obs + downtime_ndays,
-        generated by rubin_scheduler.site_models downtime modules.
+        the standard downtime generated by rubin_scheduler.site_models
+        downtime modules is used.
     real_downtime
-        Use the time the LSST survey was on-sky operational to determine
-        the downtime up to day_obs. This is only useful to check simulations
-        running from the start of survey (without using real visits) match
+        Use the time the LSST FBS survey was on-sky to determine
+        the downtime up to downtime_start_day_obs.
+        This is useful to check simulations running from the start
+        of survey (without using real visits) match
         the appropriate general characteristics of the real survey to date.
         It does also give an approximately realistic view of up/down time
         prior to the current date.
     visits
         Pass in the visits from the consdb.
         Only needed if real_downtime is True.
-    downtime_start_day_obs
-        Start simulating downtime in this module on downtime_start_day_obs, and run
-        simulation to day_obs + downtime_ndays.
-    new_downtime_ndays
-        Generate downtime values from day_obs to day_obs + downtime_ndays.
-        Use rubin_scheduler.site_models downtime models beyond this.
-
+    survey_start_mjd
+        The nominal start of the survey.
+        Used for standard Scheduled and UnscheduledMoreY1 downtimes
+        that extend after new_downtime_ndays.
 
     Returns
     -------
-    survey_info
+    survey_info : `dict`
         Returns a dictionary with keys containing information about the
         survey. Among others, this includes:
         `downtimes` - the downtimes to feed to the ModelObservatory.
     """
     warnings.filterwarnings("ignore", category=ErfaWarning)
 
-    survey_start = Time(SURVEY_START_MJD, format="mjd", scale="utc")
-    # Time limits for simulating downtime HERE
+    # We need 'survey_start' to anchor normal rubin_scheduler Downtime
+    survey_start = Time(survey_start_mjd, format="mjd", scale="utc")
+    survey_end = survey_start + TimeDelta(365 * 10.2, format="jd")
+    # Time limits for simulating downtime in this function.
     downtime_start = rn_dayobs.day_obs_to_time(downtime_start_day_obs)
-    if downtime_start < survey_start:
-        survey_start = downtime_start
+    # Simulated downtime period,
     downtime_length = TimeDelta(new_downtime_ndays, format="jd")
     downtime_end = downtime_start + downtime_length
-    survey_end = survey_start + TimeDelta(365 * 10.2, format="jd")
 
-    count_start = np.min([survey_start - TimeDelta(30, format="jd"), downtime_start])
+    count_start = downtime_start
+    if visits is not None:
+        # But we might need sunset/rise times earlier too.
+        # Note that visits should be consdb or converted consdb -
+        # so obs_end_mjd should be present regardless of name of startMJD
+        if "obs_start_mjd" in visits.columns:
+            obs_start_mjd_key = "obs_start_mjd"
+        else:
+            obs_start_mjd_key = "observationStartMJD"
+        if add_downtime and real_downtime:
+            visit_day_obs_start = rn_dayobs.time_to_day_obs(
+                Time(visits[obs_start_mjd_key].min(), format="mjd", scale="tai")
+            )
+            count_start = rn_dayobs.day_obs_to_time(visit_day_obs_start)
+
     dayobsmjd = np.arange(count_start.mjd, survey_end.mjd + 0.5, 1)
 
     # Find sunset and sunrise info during the period of downtime to model here
@@ -228,8 +252,8 @@ def survey_times(
     # Start with these configured only over the downtime simulated here
     alm_start = np.where(abs(almanac.sunsets["sunset"] - count_start.mjd) < 0.5)[0][0]
     alm_end = np.where(abs(almanac.sunsets["sunset"] - downtime_end.mjd) < 0.5)[0][0]
-    sunsets = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
-    sunrises = almanac.sunsets[alm_start:alm_end]["sun_n12_rising"]
+    evening_twi = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
+    morning_twi = almanac.sunsets[alm_start:alm_end]["sun_n12_rising"]
     actual_sunsets = almanac.sunsets[alm_start:alm_end]["sunset"]
     actual_sunrises = almanac.sunsets[alm_start:alm_end]["sunrise"]
 
@@ -240,19 +264,20 @@ def survey_times(
         "survey_end": survey_end,
         "downtime_start": downtime_start,
         "downtime_end": downtime_end,
-        "early_dome_closure": early_dome_closure,
+        "late_start": minutes_after_sunset12,
+        "early_end": early_dome_closure,
     }
 
     # Add time limits and downtime
     # early_dome_closure is the time ahead of 12-deg sunrise to close
 
     # Always add dome_closure during downtime_start to downtime_end
-    down_starts = sunrises - early_dome_closure / 24
+    down_starts = morning_twi - early_dome_closure / 24
     down_ends = actual_sunrises
 
     # And we might as well throw in being slow on sky
     d_starts = actual_sunsets
-    d_ends = sunsets + minutes_after_sunset12 / 60 / 24
+    d_ends = evening_twi + minutes_after_sunset12 / 60 / 24
 
     down_starts = np.concatenate([down_starts, d_starts])
     down_ends = np.concatenate([down_ends, d_ends])
@@ -263,17 +288,17 @@ def survey_times(
         # Placeholder if we want to put in known upcoming weather
         # problems for simulations (or scheduled maintenance)
         weather_starts: list[Time] = [
-            Time("2026-03-02T12:00:00", scale="utc"),
+            Time("2026-06-19T12:00:00", scale="utc"),  # ~ June shutdown
         ]
         weather_ends: list[Time] = [
-            Time("2026-03-26T12:00:00", scale="utc"),
+            Time("2026-07-04T12:00:00", scale="utc"),  # ~ June shutdown
         ]
 
         # Generate downtimes during downtime_start to downtime_end
         rng = np.random.default_rng(seed=random_seed)
 
-        night_start = sunsets
-        night_end = actual_sunrises - early_dome_closure / 24.0
+        night_start = evening_twi
+        night_end = morning_twi - early_dome_closure / 24.0
 
         # Add random periods of downtime within each night,
         # Very similar to the unscheduled downtime in
@@ -331,6 +356,8 @@ def survey_times(
                 down_starts = np.concatenate([down_starts, d_starts])
                 down_ends = np.concatenate([down_ends, d_ends])
 
+        # Need to check this matchup better. Setting the start_time to the
+        # end of the simulated downtime placed the chunks too strongly.
         unscheduled_downtime = UnscheduledDowntimeMoreY1Data(start_time=survey_start, survey_length=3700)
         # This may not be good for counting per night ..
         for ds, de in zip(unscheduled_downtime.downtime["start"], unscheduled_downtime.downtime["end"]):
@@ -368,70 +395,61 @@ def survey_times(
             down_starts = down_starts[good]
             diff = down_starts[1:] - down_ends[0:-1]
 
-    # Replace downtime before now, if real_downtime
-    if add_downtime and real_downtime:
-        if downtime_start_day_obs is None:
-            downtime_start_day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(Time.now()))
-        day_obs_mjd = rn_dayobs.day_obs_to_time(downtime_start_day_obs).mjd
+    if add_downtime and real_downtime and visits is None:
+        raise ValueError("No visits found and but real_downtime is True.")
 
-        if visits is None or len(visits) == 0:
-            logger.warning("No visits found and looking for real downtime")
-        else:
-            # Identify gaps/downtime starts
-            # Note that visits should be consdb or converted consdb -
-            # so obs_end_mjd should be present regardless of name of startMJD
-            if "obs_start_mjd" in visits.columns:
-                obs_start_mjd_key = "obs_start_mjd"
-            else:
-                obs_start_mjd_key = "observationStartMJD"
-            edges = np.where(np.diff(visits[obs_start_mjd_key].values) > 230 / 60 / 60 / 24)[0]
-            dropout_starts = visits.iloc[edges]["obs_end_mjd"].values
-            dropout_ends = visits.iloc[edges + 1][obs_start_mjd_key].values - 150 / 60 / 60 / 24
+    # Replace downtime before downtime_start, if real_downtime
+    if add_downtime and real_downtime and visits is not None:
 
+        # Identify gaps/downtime starts
+        edges = np.where(np.diff(visits[obs_start_mjd_key].values) > 230 / 60 / 60 / 24)[0]
+        # Every time there is a gap, a dropout "starts"
+        dropout_starts = visits.iloc[edges]["obs_end_mjd"].values
+        # And at the end of each gap, a dropout "ends"
+        dropout_ends = visits.iloc[edges + 1][obs_start_mjd_key].values - 150 / 60 / 60 / 24
+
+        if visits.obs_end_mjd.max() < downtime_start.mjd:
+            # If the last visit ended before the downtime simulation should
+            # start, it should trigger an additional dropout.
             dropout_starts = np.concatenate([dropout_starts, np.array([visits.obs_end_mjd.max()])])
-            # If we query during the night, we could have a dropout_start
-            # after day_obs_mjd.
-            last_dropout_end = np.array([day_obs_mjd - 0.001])
-            if dropout_ends.max() > last_dropout_end:
-                last_dropout_end += 1
-            dropout_ends = np.concatenate([dropout_ends, last_dropout_end])
+            dropout_ends = np.concatenate([dropout_ends, np.array([downtime_start.mjd - 0.001])])
 
-            d_starts = []
-            d_ends = []
-            for ds, de in zip(dropout_starts, dropout_ends):
-                idx_s = np.where(ds >= dayobsmjd)[0][-1]
-                idx_e = np.where(de >= dayobsmjd)[0][-1]
-                if idx_s == idx_e:
+        d_starts = []
+        d_ends = []
+        for ds, de in zip(dropout_starts, dropout_ends):
+            idx_s = np.where(ds >= dayobsmjd)[0][-1]
+            idx_e = np.where(de >= dayobsmjd)[0][-1]
+            if idx_s == idx_e:
+                d_starts += [ds]
+                d_ends += [de]
+            else:
+                idx_s = idx_s + 1
+                if idx_e == idx_s:
                     d_starts += [ds]
+                    d_starts += [dayobsmjd[idx_s]]
+                    d_ends += [dayobsmjd[idx_e]]
                     d_ends += [de]
                 else:
-                    idx_s = idx_s + 1
-                    if idx_e == idx_s:
-                        d_starts += [ds]
-                        d_starts += [dayobsmjd[idx_s]]
-                        d_ends += [dayobsmjd[idx_e]]
-                        d_ends += [de]
-                    else:
-                        idx_e = idx_e + 1
-                        d_starts += [ds]
-                        d_starts += list(dayobsmjd[idx_s:idx_e])
-                        d_ends += list(dayobsmjd[idx_s:idx_e])
-                        d_ends += [de]
+                    idx_e = idx_e + 1
+                    d_starts += [ds]
+                    d_starts += list(dayobsmjd[idx_s:idx_e])
+                    d_ends += list(dayobsmjd[idx_s:idx_e])
+                    d_ends += [de]
 
-            # Use real downtime where we have that information, but continue
-            # with sim downtime
-            keep_starts = down_starts[np.where(down_starts >= day_obs_mjd)]
-            keep_ends = down_ends[np.where(down_starts >= day_obs_mjd)]
+        # Use real downtime where we have that information, but continue
+        # with sim downtime
+        keep_starts = down_starts[np.where(down_starts >= downtime_start.mjd)]
+        keep_ends = down_ends[np.where(down_starts >= downtime_start.mjd)]
 
-            down_starts = np.concatenate([d_starts, keep_starts])
-            down_ends = np.concatenate([d_ends, keep_ends])
+        down_starts = np.concatenate([d_starts, keep_starts])
+        down_ends = np.concatenate([d_ends, keep_ends])
 
     # Trim all of these to sunrise/sunset
     # use sunsets/sunrises over the whole survey
     alm_start = np.where(abs(almanac.sunsets["sunset"] - count_start.mjd) < 0.5)[0][0]
     alm_end = np.where(abs(almanac.sunsets["sunset"] - survey_end.mjd) < 0.5)[0][0]
-    sunsets = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
-    sunrises = almanac.sunsets[alm_start:alm_end]["sun_n12_rising"]
+    evening_twi = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
+    morning_twi = almanac.sunsets[alm_start:alm_end]["sun_n12_rising"]
     actual_sunsets = almanac.sunsets[alm_start:alm_end]["sunset"]
     actual_sunrises = almanac.sunsets[alm_start:alm_end]["sunrise"]
 
@@ -476,49 +494,49 @@ def survey_times(
         diff = downtimes["start"][1:] - downtimes["end"][0:-1]
 
     # Count up downtime within each night
-    downtime_per_night = np.zeros(len(sunrises))
+    downtime_per_night = np.zeros(len(evening_twi))
     for start, end in zip(downtimes["start"], downtimes["end"]):
         idx = np.where((start >= dayobsmjd) & (end <= dayobsmjd + 1))
         if len(idx[0]) == 0:
             logging.error(
-                "no index identified",
-                (start, end, Time(start, format="mjd").iso, Time(end, format="mjd").iso),
+                "no index identified"
+                f" {start} {end} {Time(start, format='mjd').iso} {Time(end, format='mjd').iso}",
             )
             continue
         if len(idx[0]) > 1:
             logging.error(
-                "more than one index identified",
-                (start, end, Time(start, format="mjd").iso, Time(end, format="mjd").iso),
+                "more than one index identified"
+                f" {start} {end} {Time(start, format='mjd').iso} {Time(end, format='mjd').iso}",
             )
-            logging.error((idx, dayobsmjd[idx], sunsets[idx], sunrises[idx]))
-        if start < sunsets[idx]:
-            dstart = sunsets[idx]
+            logging.error((idx, dayobsmjd[idx], evening_twi[idx], morning_twi[idx]))
+        if start < evening_twi[idx]:
+            dstart = evening_twi[idx]
         else:
             dstart = start
-        if end > sunrises[idx]:
-            dend = sunrises[idx]
+        if end > morning_twi[idx]:
+            dend = morning_twi[idx]
         else:
             dend = end
         downtime_per_night[idx] += (dend - dstart) * 24
 
     survey_info["downtimes"] = downtimes
     survey_info["dayobsmjd"] = dayobsmjd
-    survey_info["sunrises12"] = sunrises
-    survey_info["sunsets12"] = sunsets
-    hours_in_night = (sunrises - sunsets) * 24
+    survey_info["sunrises12"] = morning_twi
+    survey_info["sunsets12"] = evening_twi
+    hours_in_night = (morning_twi - evening_twi) * 24
     survey_info["hours_in_night"] = hours_in_night
     survey_info["downtime_per_night"] = downtime_per_night
     survey_info["avail_per_night"] = hours_in_night - downtime_per_night
     survey_info["system_availability"] = np.nanmean(
         survey_info["avail_per_night"] / survey_info["hours_in_night"]
     )
-    logger.info(f"Max length of night {hours_in_night.max()} min length of night {hours_in_night.min()}")
-    logger.info(
+    LOGGER.info(f"Max length of night {hours_in_night.max()} min length of night {hours_in_night.min()}")
+    LOGGER.info(
         f"Total nighttime {hours_in_night.sum()}, "
         f"total downtime {downtime_per_night.sum()}, "
         f"available time {hours_in_night.sum() - downtime_per_night.sum()}"
     )
-    logger.info(f"Average availability {survey_info['system_availability']}")
+    LOGGER.info(f"Average availability {survey_info['system_availability']}")
 
     return survey_info
 
@@ -589,9 +607,9 @@ def setup_observatory_summit(
     # create lookup table for expected_wait_settle over time
     # create lookup table for close_loop_filter_time over time
     if expected_wait_settle is None:
-        expected_wait_settle = 2.0
+        expected_wait_settle = 3.0
     if close_loop_filter_time is None:
-        close_loop_filter_time = 140.0
+        close_loop_filter_time = 0  # 210.0
 
     observatory = ModelObservatory(
         nside=survey_info["nside"],
@@ -615,11 +633,11 @@ def setup_observatory_summit(
             tma_performance = dict(tma.iloc[-1])
             tma_performance["settle_time"] = expected_wait_settle
             observatory.setup_telescope(**tma_performance)
-            logger.info(
+            LOGGER.info(
                 f"Setting up summit observatory with altitude_maxspeed {tma_performance['altitude_maxspeed']}"
             )
         except KeyError:
-            logger.info("USDF EFD not accessible. Using default summit-20.")
+            LOGGER.info("USDF EFD not accessible. Using default summit-20.")
             time_setup = None
     # "summit-20 TMA" - but this is a label from the summit, not 20% in all
     if time_setup is None:
@@ -632,7 +650,7 @@ def setup_observatory_summit(
             altitude_jerk=8.0,
             settle_time=expected_wait_settle,
         )
-        logger.info("Setting up summit observatory as summit-20")
+        LOGGER.info("Setting up summit observatory as summit-20")
 
     # Set up camera with band changetime
     observatory.setup_camera(band_changetime=120 + close_loop_filter_time, readtime=3.07)
@@ -704,6 +722,45 @@ def setup_observatory_simulation(
     observatory.setup_telescope(**tma_performance)
     observatory.setup_camera(band_changetime=140, readtime=3.07)
     return observatory
+
+
+class SlewScatter:
+    """Callable to return some scatter for the slew.
+
+    Attempts to match the general scale of the scatter observed
+    from the summit as of late Jan 2026.
+
+    Parameters
+    ----------
+    seed : `int`
+        Random number seed.
+    slew_scale : `float`
+        The scale for the scatter in the slew offest (seconds).
+    """
+
+    def __init__(self, seed: int = 42, slew_scale: float = 1.75) -> None:
+        self.rng = np.random.default_rng(seed)
+        self.slew_scale = slew_scale
+
+    def __call__(self, visittime: float, slewtime: float) -> float:
+        """Return a randomized offset for the visit overhead.
+
+        Parameters
+        ----------
+        visittime : `float`
+            The visit time (seconds).
+        slewtime : `float`
+            The slew time (seconds).
+
+        Returns
+        -------
+        offset: `float`
+            Random offset (seconds).
+        """
+
+        slew_scatter: float = np.abs(self.rng.normal(0, self.slew_scale))
+
+        return slew_scatter
 
 
 def save_opsim(
