@@ -36,9 +36,10 @@ def hp_moll(
     label: str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
+    rot: float | None = None,
 ) -> None:
     """Super quick figure."""
-    hp.mollview(hp_array, alpha=alpha, min=vmin, max=vmax, title=label)
+    hp.mollview(hp_array, alpha=alpha, min=vmin, max=vmax, rot=rot, title=label)
     hp.graticule()
 
 
@@ -47,6 +48,7 @@ def make_plot(
     proj: str = "laea",
     vmin: float | None = None,
     vmax: float | None = None,
+    lon_0: float = 0,
     ax: Axes | None = None,
     background: npt.NDArray | None = None,
     title: str | None = None,
@@ -81,7 +83,7 @@ def make_plot(
             gridlines=True,
             n_grid_lon=8,
             n_grid_lat=7,
-            lon_0=0,
+            lon_0=lon_0,
         )
         zoom = True
 

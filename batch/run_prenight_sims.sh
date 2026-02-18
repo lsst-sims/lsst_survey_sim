@@ -78,7 +78,7 @@ pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_S
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
 TS_CONFIG_SCHEDULER_REFERENCE="develop"
-SCHED_CONFIG_FNAME="ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+SCHED_CONFIG_FNAME="ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey_block_421.py"
 echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
 git clone --depth 1 https://github.com/lsst-ts/ts_config_scheduler
 cd ts_config_scheduler
@@ -207,7 +207,7 @@ for DAYOBS_TO_INDEX in ${DAYOBS_SIMULATED}; do
 done
 
 DELAY=240
-echo "Running SV simulation delayed ${DELAY}"
+echo "Running simulation delayed ${DELAY}"
 OPSIMRUN="prenight_delay${DELAY}_$(date --iso=s)"
 LABEL="Start time delayed by ${DELAY} minutes, nominal slew and visit overhead, ideal conditions, run at $(date --iso=s)"
 date --iso=s
@@ -237,7 +237,7 @@ rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM
 
 ANOM_SCALE="10.0"
 ANOM_SEED=101
-echo "Running SV simulation with anomalous overhead seed ${ANOM_SEED}"
+echo "Running simulation with anomalous overhead seed ${ANOM_SEED}"
 OPSIMRUN="prenight_anom${ANOM_SEED}_$(date --iso=s)"
 LABEL="Anomalous overhead (${ANOM_SEED}, ${ANOM_SCALE}), nominal start, ideal conditions, run at $(date --iso=s)"
 date --iso=s

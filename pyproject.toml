@@ -20,16 +20,22 @@ dynamic = [ "version" ]
 dependencies = [
     "astroplan",
     "astropy",
-    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.19.2",
+    "botocore",
+    "boto3",
+    "click",
     "healpy",
+    "lsst-resources",
     "matplotlib",
-    "numpy",
+    "numpy < 2.4",
     "pandas",
+    "psycopg2",
     "rubin-nights >= 0.11.0",
     "rubin-scheduler == 3.20.1",
     "rubin-sim >= 2.6.1",
-    "schedview >= 0.20.0"
+    "schedview >= 0.20.0",
+    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.19.2",
 ]
+
 
 [project.optional-dependencies]
 test = [
