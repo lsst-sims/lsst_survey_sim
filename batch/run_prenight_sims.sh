@@ -65,7 +65,7 @@ if false ; then
   LSST_SURVEY_SIM_REFERENCE=$(curl -s https://api.github.com/repos/lsst-sims/lsst_survey_sim/tags | jq -r '.[].name' | egrep '^v[0-9]+.[0-9]+.[0-9]+$' | sort -V | tail -1)
 else
   # alternately, use the HEAD of main
-  LSST_SURVEY_SIM_REFERENCE="main"
+  LSST_SURVEY_SIM_REFERENCE="u/lynnej/add_snapshot_and_baseline_obs"
 fi
 
 pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE}
