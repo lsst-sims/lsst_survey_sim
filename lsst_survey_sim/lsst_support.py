@@ -31,6 +31,8 @@ from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 """Module supporting the configuration of simulation inputs."""
 
 __all__ = [
+    "EXPECTED_WAIT_SETTLE",
+    "CURRENT_TMA_DEFAULT",
     "set_sim_flags",
     "survey_footprint",
     "survey_times",

@@ -128,10 +128,10 @@ def fetch_previous_visits(
         If True, convert to opsim format with rubin_nights.consdb_to_opsim.
         If False, keep in consdb format.
     fetch_with_tap
-        If True, use the TAP client (not available except at USDF).
-        If False, use the FastAPI client.
+        If True, use the TAP client. If False, use the FastAPI client.
+        Both clients require USDF RSP authorization.
     science_programs
-        If not specified, uses the default series of FBS
+        If not specified, uses the SCIENCE_PROGRAMS.
         An option is provided, if evaluating non-standard FBS configurations.
 
     Returns

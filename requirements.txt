@@ -11,4 +11,4 @@ psycopg2
 rubin-nights >=0.11.0
 rubin-scheduler =3.20.1
 rubin-sim >=2.6.1
-schedview >=0.20.0
+
