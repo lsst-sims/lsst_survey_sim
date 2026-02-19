@@ -39,6 +39,7 @@ jobs:
       - name: configure conda and install requirements
         shell: bash -l {0}
         run: |
+          pip install rubin-nights --no-deps
           conda install --yes --file=requirements.txt
           conda install --yes --file=test-requirements.txt
           pip install lsst.resources
