@@ -23,7 +23,6 @@ dependencies = [
     "botocore",
     "boto3",
     "click",
-    "h5py",
     "healpy",
     "lsst-resources",
     "matplotlib",
