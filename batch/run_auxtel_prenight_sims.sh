@@ -69,7 +69,7 @@ else
 fi
 
 pip install \
-  git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE} 
+  git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE}
 
 if false ; then
   # Get the scheduler version from the EFD and install it.

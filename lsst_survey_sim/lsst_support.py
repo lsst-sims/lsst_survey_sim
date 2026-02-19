@@ -9,7 +9,7 @@ import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
 from astropy.time import Time, TimeDelta
 from erfa import ErfaWarning
-from rubin_nights import connections, observatory_status
+from rubin_nights import observatory_status
 from rubin_nights.influx_query import InfluxQueryClient
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory, tma_movement
 from rubin_scheduler.scheduler.utils import (
@@ -735,7 +735,9 @@ class SlewScatter:
     seed : `int`
         Random number seed.
     slew_scale : `float`
-        The scale for the scatter in the slew offest (seconds).
+        The scale for the scatter in the slew offsets (seconds).
+        The offset here is implemented as the absolute value of a
+        normal distribution with mean 0 and stdev = slew_scale.
     """
 
     def __init__(self, seed: int = 42, slew_scale: float = 1.75) -> None:

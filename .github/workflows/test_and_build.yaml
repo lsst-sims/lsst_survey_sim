@@ -1,0 +1,58 @@
+name: Run Tests
+
+on:
+  # Run job at the end of each day
+  schedule:
+    - cron: "0 0 * * *"
+  # Run on push to main or a tag
+  push:
+    tags:
+      - "*"
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  # run by hand
+  workflow_dispatch:
+
+
+jobs:
+  tests:
+    name: Run Unit Tests (${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-latest"]
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies for build
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade build
+
+      - name: Install
+        run: |
+          python -m pip install -e '.[test]'
+
+      - name: run tests
+        shell: bash -l {0}
+        run: |
+          pytest -r a -v --cov=rubin_nights --cov=tests --cov-report=xml --cov-report=term --cov-branch
+
+      - name: Upload coverage to codecov
+        uses: codecov/codecov-action@v2
+        with:
+          file: coverage.xml
+          

@@ -1,9 +1,11 @@
 import os
 import pickle
 import unittest
+from collections.abc import Iterator
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 
+import rubin_nights.dayobs_utils as rn_dayobs
 from astropy.time import Time
 from rubin_scheduler.scheduler.model_observatory.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers.core_scheduler import CoreScheduler
@@ -12,15 +14,9 @@ from rubin_scheduler.scheduler.utils import SchemaConverter
 
 from lsst_survey_sim import simulate_lsst
 
-# export PYTHONPATH=
-# /sdf/data/rubin/user/neilsen/devel/ts_fbs_utils/python:${PYTHONPATH}
-# export PYTHONPATH=
-# /sdf/data/rubin/user/neilsen/devel/ts_config_ocs/Scheduler/
-# feature_scheduler/maintel:${PYTHONPATH}
-
 
 @contextmanager
-def temp_cwd() -> None:
+def temp_cwd() -> Iterator:
     with TemporaryDirectory() as temp_dir:
         old_cwd = os.getcwd()
         try:
@@ -32,10 +28,15 @@ def temp_cwd() -> None:
 
 class TestCLI(unittest.TestCase):
 
-    #    @unittest.skip("redundant")
-    def test_make_sv_scheduler_cli(self) -> None:
+    @unittest.skip("redundant")
+    def test_make_scheduler_cli(self) -> None:
         with temp_cwd():
             scheduler_pickle = "scheduler.p"
+
+            # Get git repo for scheduler directory
+            simulate_lsst.get_config_repo(
+                ts_config_scheduler_commit="develop", clone_path="ts_config_scheduler"
+            )
             return_status = simulate_lsst.make_lsst_scheduler_cli([scheduler_pickle])
             assert return_status == 0
 
@@ -44,7 +45,7 @@ class TestCLI(unittest.TestCase):
 
             assert isinstance(scheduler, CoreScheduler)
 
-    #    @unittest.skip("redundant")
+    @unittest.skip("redundant")
     def test_make_model_observatory_cli(self) -> None:
         with temp_cwd():
             observatory_pickle = "observatory.p"
@@ -70,6 +71,10 @@ class TestCLI(unittest.TestCase):
     def test_run_lsst_sim_cli(self) -> None:
         with temp_cwd():
             scheduler_pickle = "scheduler.p"
+            # Get git repo for scheduler directory
+            simulate_lsst.get_config_repo(
+                ts_config_scheduler_commit="develop", clone_path="ts_config_scheduler"
+            )
             return_status = simulate_lsst.make_lsst_scheduler_cli([scheduler_pickle])
             assert return_status == 0
             with open(scheduler_pickle, "rb") as pickle_io:
@@ -87,7 +92,7 @@ class TestCLI(unittest.TestCase):
             assert isinstance(observatory, ModelObservatory)
 
             init_opsim = ""
-            day_obs = "20251101"
+            day_obs = str(rn_dayobs.day_obs_str_to_int(rn_dayobs.today_day_obs()))
             sim_nights = "1"
             run_name = "test_opsim_output"
             simulate_lsst.run_lsst_sim_cli(
@@ -97,3 +102,7 @@ class TestCLI(unittest.TestCase):
             obs = SchemaConverter().opsim2obs(f"{run_name}.db")
             assert len(obs) > 500
             assert Time(obs["mjd"] - 0.5, format="mjd").min().datetime.strftime("%Y%m%d") == day_obs
+
+
+if __name__ == "__main__":
+    unittest.main()

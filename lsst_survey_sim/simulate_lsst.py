@@ -25,7 +25,7 @@ from rubin_scheduler.scheduler.features import Conditions
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
 from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter, SimTargetooServer, TargetoO
-from rubin_scheduler.utils import SURVEY_START_MJD, DEFAULT_NSIDE, Site
+from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 
 try:
     from rubin_sim.sim_archive import make_sim_data_dir
@@ -56,7 +56,9 @@ __all__ = [
     "run_lsst_sim_cli",
 ]
 
-CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+CONFIG_SCRIPT_PATH = (
+    "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey_block_419.py"
+)
 """Default path to default LSST survey configuration.
 """
 
@@ -532,7 +534,8 @@ def setup_observatory(
             downtime_start_day_obs = day_obs
         else:
             # Start last real data day if we're using real downtime
-            t_last_visit = Time(int(initial_opsim.obs_end_mjd.max() - 0.5), format="mjd", scale="tai")
+            q: pd.DataFrame = initial_opsim
+            t_last_visit = Time(int(q.obs_end_mjd.max() - 0.5), format="mjd", scale="tai")
             downtime_start_day_obs = t_last_visit.iso[0:10].replace("-", "")
 
     survey_info = lsst_support.survey_times(
@@ -726,6 +729,8 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
     opsim_fname = args.opsim
+    if len(opsim_fname) == 0:
+        opsim_fname = None
     scheduler_fname = args.file_name
     scheduler_config_script = args.config_script
     scheduler_ddf_config_script = args.config_ddf_script
@@ -756,11 +761,16 @@ def make_model_observatory_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Create a pickle of a model observatory")
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
     parser.add_argument("--day_obs", type=int, default=None, help="day_obs for simulation start")
-    parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory.")
+    parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory")
     parser.add_argument(
-        "--include-downtime", action="store_true", dest="include_downtime", help="Include scheduled downtime"
+        "--include-downtime",
+        action="store_true",
+        dest="include_downtime",
+        help="Include scheduled and unscheduled downtime",
     )
-    parser.add_argument("--seeing", type=float, default=0, help="Seeing to use")
+    parser.add_argument(
+        "--seeing", type=float, default=0, help="Use a fixed value for the atmospheric seeing"
+    )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
     if args.day_obs == 0 or args.day_obs is None:
@@ -810,7 +820,9 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Run an SV simulation.")
     parser.add_argument("scheduler", type=str, help="scheduler pickle file.")
     parser.add_argument("observatory", type=str, help="model observatory pickle file.")
-    parser.add_argument("initial_opsim", type=str, help="initial opsim database.")
+    parser.add_argument(
+        "initial_opsim", type=str, help="initial opsim database to include with the new simulated visits"
+    )
     parser.add_argument("day_obs", type=int, help="start day obs.")
     parser.add_argument("sim_nights", type=int, help="number of nights to run.")
     parser.add_argument("run_name", type=str, help="Run (also db output) name.")
@@ -825,9 +837,11 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
         default=1,
         help="random number seed for anomalous scatter in overhead",
     )
-    parser.add_argument("--tags", type=str, default=[], nargs="*", help="The tags on the simulation.")
+    parser.add_argument("--tags", type=str, default="", nargs="*", help="The tags on the simulation.")
     parser.add_argument("--results", type=str, default="", help="Results directory.")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
+    if args.tags == "":
+        args.tags = []
 
     with open(args.scheduler, "rb") as sched_io:
         scheduler = pickle.load(sched_io)
