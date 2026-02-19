@@ -527,14 +527,13 @@ def setup_observatory(
     # Downtime_start_day_obs == day to start *simulated* downtime
     if downtime_start_day_obs is None:
         # So if it is not set, figure out when it should be
-        if add_downtime is True:
-            if real_downtime is False:
-                # Start first sim day if we're not using real downtime
-                downtime_start_day_obs = day_obs
-            else:
-                # Start last real data day if we're using real downtime
-                t_last_visit = Time(int(initial_opsim.obs_end_mjd.max() - 0.5), format="mjd", scale="tai")
-                downtime_start_day_obs = t_last_visit.iso[0:10].replace("-", "")
+        if real_downtime is False:
+            # Start first sim day if we're not using real downtime
+            downtime_start_day_obs = day_obs
+        else:
+            # Start last real data day if we're using real downtime
+            t_last_visit = Time(int(initial_opsim.obs_end_mjd.max() - 0.5), format="mjd", scale="tai")
+            downtime_start_day_obs = t_last_visit.iso[0:10].replace("-", "")
 
     survey_info = lsst_support.survey_times(
         downtime_start_day_obs=downtime_start_day_obs,
@@ -756,7 +755,7 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
 def make_model_observatory_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Create a pickle of a model observatory")
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
-    parser.add_argument("--day_obs", type=int, default=0, help="day_obs for simulation start")
+    parser.add_argument("--day_obs", type=int, default=None, help="day_obs for simulation start")
     parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory.")
     parser.add_argument(
         "--include-downtime", action="store_true", dest="include_downtime", help="Include scheduled downtime"
@@ -764,8 +763,8 @@ def make_model_observatory_cli(cli_args: list = []) -> int:
     parser.add_argument("--seeing", type=float, default=0, help="Seeing to use")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
-    if args.day_obs == 0:
-        day_obs = rn_dayobs.today_day_obs()
+    if args.day_obs == 0 or args.day_obs is None:
+        day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.today_day_obs())
     else:
         day_obs = args.day_obs
 
