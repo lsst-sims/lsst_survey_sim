@@ -45,6 +45,19 @@ astropy.utils.iers.conf.iers_degraded_accuracy = "ignore"
 LOGGER = logging.getLogger(__name__)
 
 
+# Summit slew parameters
+EXPECTED_WAIT_SETTLE = 3.0
+CURRENT_TMA_DEFAULT = {
+    "azimuth_maxspeed": 2.0,
+    "azimuth_accel": 2.0,
+    "azimuth_jerk": 8.0,
+    "altitude_maxspeed": 2.0,
+    "altitude_accel": 2.0,
+    "altitude_jerk": 8.0,
+    "settle_time": EXPECTED_WAIT_SETTLE,
+}
+
+
 def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     """Set some likely flags for the observatory setup, based on
     the day_obs (of the simulation start) compared to today's day_obs.
@@ -547,8 +560,8 @@ def setup_observatory_summit(
     add_clouds: bool = False,
     too_server: SimTargetooServer | None = None,
     time_setup: Time | None = None,
-    expected_wait_settle: float | None = None,
-    close_loop_filter_time: float | None = None,
+    expected_wait_settle: float = EXPECTED_WAIT_SETTLE,
+    close_loop_filter_time: float = 0,
 ) -> ModelObservatory:
     """Configure a model observatory matching the velocity/acceleration/jerk
     parameters at `time_setup`.
@@ -571,15 +584,14 @@ def setup_observatory_summit(
         (target of opportunity) events.
     time_setup
         The Time at which to consider the observatory TMA configuration.
-        If None, uses 20% velocity/acceleration/jerk settings.
+        If None, uses CURRENT_TMA_DEFAULT settings.
     expected_wait_settle
         The current wait and/or settle time beyond TMA movement expected
         for the visit gap.
-        Default `None` will use expected performance at `time_setup`.
     close_loop_filter_time
         The extra time (in seconds) to add to a filter change to account
         for close-loop iterations.
-        Default `None` will use expected performance at `time_setup`.
+        With 2 close-loop iterations this is currently about 210s.
 
     Returns
     -------
@@ -609,7 +621,7 @@ def setup_observatory_summit(
     if expected_wait_settle is None:
         expected_wait_settle = 3.0
     if close_loop_filter_time is None:
-        close_loop_filter_time = 0  # 210.0
+        close_loop_filter_time = 0
 
     observatory = ModelObservatory(
         nside=survey_info["nside"],
@@ -641,16 +653,10 @@ def setup_observatory_summit(
             time_setup = None
     # "summit-20 TMA" - but this is a label from the summit, not 20% in all
     if time_setup is None:
-        observatory.setup_telescope(
-            azimuth_maxspeed=2.0,
-            azimuth_accel=2.0,
-            azimuth_jerk=8.0,
-            altitude_maxspeed=2.0,
-            altitude_accel=2.0,
-            altitude_jerk=8.0,
-            settle_time=expected_wait_settle,
-        )
-        LOGGER.info("Setting up summit observatory as summit-20")
+        tma = CURRENT_TMA_DEFAULT
+        tma["settle_time"] = expected_wait_settle
+        observatory.setup_telescope(**tma)
+        LOGGER.info("Setting up summit observatory as CURRENT_TMA_DEFAULT")
 
     # Set up camera with band changetime
     observatory.setup_camera(band_changetime=120 + close_loop_filter_time, readtime=3.07)
