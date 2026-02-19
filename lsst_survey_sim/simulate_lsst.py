@@ -756,7 +756,7 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
 def make_model_observatory_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Create a pickle of a model observatory")
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
-    parser.add_argument("--day_obs", type=int, default=None, help="day_obs for simulation start")
+    parser.add_argument("--day_obs", type=int, default=0, help="day_obs for simulation start")
     parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory.")
     parser.add_argument(
         "--include-downtime", action="store_true", dest="include_downtime", help="Include scheduled downtime"
@@ -764,7 +764,7 @@ def make_model_observatory_cli(cli_args: list = []) -> int:
     parser.add_argument("--seeing", type=float, default=0, help="Seeing to use")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
-    if args.day_obs is None:
+    if args.day_obs == 0:
         day_obs = rn_dayobs.today_day_obs()
     else:
         day_obs = args.day_obs
