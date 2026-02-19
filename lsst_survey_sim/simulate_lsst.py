@@ -61,6 +61,7 @@ CONFIG_SCRIPT_PATH = (
 )
 """Default path to default LSST survey configuration.
 """
+CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_419.py"
 
 SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
 """Science_program values to include for the default LSST survey visits.
