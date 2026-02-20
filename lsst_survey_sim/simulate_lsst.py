@@ -4,6 +4,7 @@ import os
 import pickle
 import sqlite3
 import subprocess
+import time
 import warnings
 from typing import Any
 
@@ -13,6 +14,7 @@ import healpy as hp
 import numpy as np
 import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
+import rubin_nights.lfa_data as rn_lfa
 import rubin_nights.rubin_sim_addons as rn_sim
 from astroplan import Observer
 from astropy.time import Time, TimeDelta
@@ -23,7 +25,7 @@ from rubin_scheduler.scheduler.features import Conditions
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers import CoreScheduler, DateSwapBandScheduler, SimpleBandSched
 from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter, SimTargetooServer, TargetoO
-from rubin_scheduler.utils import DEFAULT_NSIDE, Site
+from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 
 try:
     from rubin_sim.sim_archive import make_sim_data_dir
@@ -34,20 +36,19 @@ from rubin_sim.sim_archive.prenight import AnomalousOverheadFunc
 
 from . import lsst_support
 
-CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
-CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_407.py"
-
 LOGGER = logging.getLogger(__name__)
 
+"""Module implementing the configuration and running of simulations."""
+
 __all__ = [
-    "get_configuration",
+    "SCIENCE_PROGRAMS",
+    "get_config_repo",
     "fetch_previous_visits",
     "fetch_too_events",
     "setup_scheduler",
     "setup_band_scheduler",
     "setup_observatory",
     "run_sim",
-    "simple_sim",
     "fetch_lsst_visits_cli",
     "make_lsst_scheduler_cli",
     "make_model_observatory_cli",
@@ -55,13 +56,24 @@ __all__ = [
     "run_lsst_sim_cli",
 ]
 
+CONFIG_SCRIPT_PATH = (
+    "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey_block_419.py"
+)
+"""Default path to default LSST survey configuration.
+"""
+CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_419.py"
 
-def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
+SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
+"""Science_program values to include for the default LSST survey visits.
+"""
+
+
+def get_config_repo(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
     """Git checkout ts_config_scheduler and set it to the desired commit.
 
     `ts_config_scheduler_commit` is fetchable from
-    `lsst.sal.Scheduler.logevent_configurationApplied`
-    or use tip of the run branch, fetchable from `lsst.obsenv.run_branch`.
+    `lsst.sal.Scheduler.logevent_configurationApplied`.
+    For most uses, it's also reasonable to just use `develop`.
 
     Parameters
     ----------
@@ -70,6 +82,10 @@ def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_con
     clone_path : `str` or None
         The location to clone the repo.
         Join with the remainder of the path to the configuration scripts.
+
+    Returns
+    -------
+    No return value; this creates or modifies the github repo in `clone_path`.
     """
     repo_url = "https://github.com/lsst-ts/ts_config_scheduler"
 
@@ -88,8 +104,13 @@ def get_configuration(ts_config_scheduler_commit: str, clone_path: str = "ts_con
 
 
 def fetch_previous_visits(
-    day_obs: int, tokenfile: str | None = None, site: str = "usdf", convert_to_opsim: bool = True
-) -> pd.DataFrame:
+    day_obs: int,
+    tokenfile: str | None = None,
+    site: str = "usdf",
+    convert_to_opsim: bool = True,
+    fetch_with_tap: bool = True,
+    science_programs: list[str] | None = None,
+) -> pd.DataFrame | None:
     """Fetch relevant visits from the Consdb.
 
     Parameters
@@ -107,28 +128,48 @@ def fetch_previous_visits(
     convert_to_opsim
         If True, convert to opsim format with rubin_nights.consdb_to_opsim.
         If False, keep in consdb format.
+    fetch_with_tap
+        If True, use the TAP client. If False, use the FastAPI client.
+        Both clients require USDF RSP authorization.
+    science_programs
+        If not specified, uses the SCIENCE_PROGRAMS.
+        An option is provided, if evaluating non-standard FBS configurations.
 
     Returns
     -------
-    visits : `pd.DataFrame`
+    visits : `pd.DataFrame` or None
         DataFrame containing (optionally) opsim-formatted visit information
         from the consdb for the LSST visits up to day_obs.
         Is None if no visits available.
     """
     # Get the survey visits from the ConsDB.
     endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
-    consdb = endpoints["consdb"]
+    if fetch_with_tap:
+        consdb = endpoints["consdb_tap"]
+    else:
+        consdb = endpoints["consdb"]
 
+    t0 = time.time()
     instrument = "lsstcam"
     query = (
         f"select v.*, q.* from cdb_{instrument}.visit1 as v "
         f"left join cdb_{instrument}.visit1_quicklook as q "
         f"on v.visit_id = q.visit_id "
         f"where v.day_obs < {day_obs} "
-        f"and v.science_program = 'BLOCK-407' or v.science_program = 'BLOCK-408'"
     )
+    if science_programs is None:
+        science_programs = SCIENCE_PROGRAMS
+    program_constraint = "or ".join([f"v.science_program = '{program}' " for program in science_programs])
+    query = query + f" and ({program_constraint})"
+    LOGGER.info(f"Querying for visits in programs {science_programs}")
     visits = consdb.query(query)
+    # Throw out a specific subset of bad metadata
+    visits = visits.query("not (science_program == 'BLOCK-417' and img_type == 'acq')")
+    LOGGER.info(f"Fetched {len(visits)} visits.")
+    t1 = time.time()
+    LOGGER.debug(f"Query to fetch previous visits: {t1-t0} seconds.")
     if len(visits) > 0:
+        t0 = time.time()
         # Augment visits adds some additional columns.
         visits = augment_visits.augment_visits(visits, instrument)
         # Remove known bad visits.
@@ -142,7 +183,8 @@ def fetch_previous_visits(
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
             visits.loc[:, "note"] = visits.loc[:, "scheduler_note"].copy()
-        LOGGER.info(f"Fetched {len(visits)} good visits.")
+        t1 = time.time()
+        LOGGER.debug(f"Augmenting and converting previous visits: {t1-t0} seconds.")
     else:
         visits = None
     return visits
@@ -164,11 +206,21 @@ def fetch_too_events(t_start: Time, t_end: Time, site: str = "base") -> list[Tar
 
     Returns
     -------
-    toos : `list` [ `TargetoO` ] or None
-        List of rubin_scheduler.scheduler.utils.TargetoO objects.
-        Add to conditions (or ModelObservatory).
+    toos : `list` [ `rubin_scheduler.scheduler.utils.TargetoO` ] or None
+        List of `rubin_scheduler.scheduler.utils.TargetoO` objects.
         Returns None if no ToOs were within t_start to t_end or
         if there was an error connecting or processing the ToOs.
+
+    Notes
+    -----
+    The returned list of `TargetoO` objects should be passed to a
+    `rubin_scheduler.scheduler.utils.SimTargetooServer`:
+
+    >>> too_server = SimTargetooServer(toos)
+
+    As currently there are likely to be changes to make to the
+    returned too values (such as updating the 'event_duration'),
+    only the list (not the SimTargetooServer) is returned here.
     """
     too_client = InfluxQueryClient(site, db_name="lsst.scimma")
 
@@ -200,8 +252,7 @@ def fetch_too_events(t_start: Time, t_end: Time, site: str = "base") -> list[Tar
                 LOGGER.error(f"Could not convert timestamp {a.event_trigger_timestamp}")
                 return None
             too = TargetoO(
-                # tooid=a.source, # is what I'd like to do
-                tooid=a.counter,
+                tooid=a.source,
                 footprint=reward_map,
                 ra_rad_center=ra_rad_center,
                 dec_rad_center=dec_rad_center,
@@ -245,9 +296,9 @@ def setup_scheduler(
         exists, the current lsst_ddf_gen scripts exit quickly.
     day_obs
         The day_obs (integer) of the day on which to start the simulation.
-        Will fetch all visits *up to* this day_obs.
-        If initial_opsim is passed, this can be ignored.
-        If None, and no initial_opsim and no opsim_filename, will use "today".
+        Is used to constrain input visits to < day_obs, as well as
+        to load ToOs from the ToO server, as relevant.
+        The default of None will be replaced with 'today'.
     too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
@@ -266,11 +317,14 @@ def setup_scheduler(
 
     Returns
     -------
-    scheduler : `CoreScheduler`
-    initial_opsim : `pd.DataFrame`
-    nside : `int`
+    scheduler, initial_opsim, nside : `CoreScheduler`, `pd.DataFrame`, `int`
+        The configured scheduler, the opsim-formatted visits dataframe
+        used to initialize the scheduler, and the nside for the scheduler.
     """
-    # Run the ddf config
+    # Run the ddf config - spawns subprocess
+    # as the DDF scripts are intended to be run from the command line and
+    # weren't written with a separate 'main' function (and the hash of
+    # the file matters).
     if config_ddf_script_path is not None:
         # Run the DDF configuration
         result = subprocess.run(config_ddf_script_path, capture_output=True)
@@ -288,9 +342,6 @@ def setup_scheduler(
     # Set up ToOScriptedSurveys to be ready for ToOs.
     if too_server is not None and band_scheduler is not None:
         too_objs = too_server(day_obs_time.mjd)
-        # This next bit is a total hack because mjd0 in ToOScriptedSurvey
-        # should probably be the time of the ToO mjd-start, NOT the
-        # current conditions.mjd ...
         if too_objs is not None:
             LOGGER.info(f"Adding {len(too_objs)} ToO to FBS setup.")
             for too in too_objs:
@@ -317,14 +368,62 @@ def setup_scheduler(
 
     # Convert opsim visits to ObservationArray and feed the scheduler.
     if initial_opsim is not None and len(initial_opsim) > 0:
-        sch_obs = SchemaConverter().opsimdf2obs(initial_opsim)
+        q = initial_opsim.query("observationStartMJD <= @day_obs_time.mjd")
+        sch_obs = SchemaConverter().opsimdf2obs(q)
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             scheduler.add_observations_array(sch_obs)
     return scheduler, initial_opsim, nside
 
 
+def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreScheduler, Conditions, int]:
+    """Set up the survey scheduler from a snapshot.
+
+    Fetches the most recent snapshot before `time`.
+
+
+    Parameters
+    ----------
+    time
+        Search for the most recent snapshot from MAINTEL queue,
+        prior to `time`.
+    site
+        Which EFD and S3 site to query and fetch the snapshot from.
+        Typically "usdf" but could be "summit".
+
+    Returns
+    -------
+    scheduler, summit_conditions, nside : `CoreScheduler`, `Conditions`, `int`
+        The configured scheduler, the `Conditions` at the time of the
+        snapshot, and the nside of the scheduler.
+    """
+    efd_client = InfluxQueryClient(site)
+    topic = "lsst.sal.Scheduler.logevent_largeFileObjectAvailable"
+    snapshots = efd_client.select_top_n(topic, ["url"], num=1, time_cut=time, index=1)
+    uri = snapshots["url"].iloc[-1]
+    LOGGER.info(f"Fetching snapshot {uri} from {site}")
+    if site == "summit":
+        at_usdf = False
+    else:
+        at_usdf = True
+    scheduler, summit_conditions, last_targets = rn_lfa.get_scheduler_snapshot(uri, at_usdf=at_usdf)
+    # Check that these are the right kind of things
+    assert isinstance(scheduler, CoreScheduler)
+    assert isinstance(summit_conditions, Conditions)
+    nside = scheduler.nside
+    return scheduler, summit_conditions, nside
+
+
 def setup_band_scheduler() -> DateSwapBandScheduler:
+    """Configure and return the DateSwapBandScheduler.
+
+    This tracks the actual and future planned summit band swaps.
+
+    Returns
+    -------
+    band_scheduler : `DataSwapBandScheduler`
+        The configured band scheduler.
+    """
     # Set up the filter scheduler.
     # Might be reasonable to add kwargs for upcoming filter swaps,
     # but it's also pretty easy to modify this file to match summit schedule.
@@ -337,12 +436,12 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2025-10-28": ["g", "r", "i", "z", "y"],
         "2025-11-11": ["u", "g", "r", "i", "z"],
         "2025-11-25": ["g", "r", "i", "z", "y"],
-        "2025-12-11": ["u", "g", "r", "i", "z"],
-        "2025-12-24": ["g", "r", "i", "z", "y"],
-        "2026-01-12": ["u", "g", "r", "i", "z"],
+        "2025-12-09": ["u", "g", "r", "i", "z"],
+        "2025-12-23": ["g", "r", "i", "z", "y"],
+        "2026-01-13": ["u", "g", "r", "i", "z"],
         "2026-01-27": ["g", "r", "i", "z", "y"],
-        "2026-02-10": ["u", "g", "r", "i", "z"],
-        "2026-02-24": ["g", "r", "i", "z", "y"],
+        # "2026-02-10": ["u", "g", "r", "i", "z"], # cancelled
+        # "2026-02-24": ["g", "r", "i", "z", "y"], # cancelled
         "2026-03-12": ["u", "g", "r", "i", "z"],
         "2026-03-26": ["g", "r", "i", "z", "y"],
     }
@@ -362,22 +461,25 @@ def setup_observatory(
     add_clouds: bool = False,
     seeing: float | None = None,
     real_downtime: bool = False,
+    downtime_start_day_obs: int | None = None,
     initial_opsim: pd.DataFrame | None = None,
     too_server: SimTargetooServer | None = None,
+    baseline_observatory: bool = False,
+    survey_start_mjd: float = SURVEY_START_MJD,
 ) -> tuple[ModelObservatory, dict]:
     """Set up the model observatory.
 
     Parameters
     ----------
     day_obs
-        The day_obs to start generating (extra) downtime for the observatory.
+        The day_obs of the start of the simulation.
     nside
         The HEALpix nside value for the model observatory and scheduler.
     add_downtime
         If False, will not add any random downtime to the model observatory.
         If True, then scheduled and unscheduled downtime will be added.
-        For prenight simulations, this should probably be True.
-        For full simulations, this should be False.
+        For prenight simulations, this should probably be False.
+        For full simulations, this should be True.
     add_clouds
         If True, will add cloud downtime to the model observatory.
         If False, will not add cloud downtime and use 'ideal' (no) clouds.
@@ -389,42 +491,60 @@ def setup_observatory(
         For full simulations, this should be None.
         For prenight simulations - it depends. If we have an estimate
         of the seeing expected for the night, it may be useful to set a value.
-    opsim_filename
-        Get previous visits from a file, instead of directly from
-        the ConsDB. If set, then consdb will not be queried.
-    tokenfile
-        Path to the RSP tokenfile.
-        See also `rubin_nights.connections.get_access_token`.
-        Default None will use `ACCESS_TOKEN` environment variable.
-    site
-        The site (`usdf`, `usdf-dev`, `summit` ..) location at
-        which to query services. Must match tokenfile origin.
     real_downtime
         A boolean flag to determine whether to rewrite the downtime
-        within the range of initial_opsim into the actual uptime for visits
+        before day_obs of initial_opsim into the actual uptime for visits
         or not. If True, initial_opsim must not be None.
+    downtime_start_day_obs
+        The day_obs to start generating additional simulated downtime.
+        Set this value to control the swap between real_downtime and
+        simulated downtime, when add_downtime is True.
+        If None, and real_downtime is False, this will be set to day_obs.
+        If None, and real_downtime is True, this will be set to the end of
+        the initial_opsim database.
     initial_opsim
-        If initial_opsim is not None, use these visits instead of fetching or
-        reading from disk. These should be *opsim* formatted visits.
+        Dataframe of opsim-formatted visits to use to define the uptime
+        of the observatory, if `real_downtime` is True.
     too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
+    baseline_observatory
+        If True, set up an observatory to mimic baseline_v5.1 simulation.
+        If False (default), set up an observatory to mimic summit performance.
+    survey_start_mjd
+        The nominal start of the survey. Can be derived from the scheduler.
+        Here, used to help set up the downtime models.
 
     Returns
     -------
-    observatory : `ModelObservatory`
-    survey_info : `dict`
+    observatory, survey_info : `ModelObservatory`, `dict`
+        The configured observatory along with the dictionary containing
+        additional information on how the observatory was configured,
+        as created by `lsst_support.survey_times`.
     """
     # Find the survey information - survey start, downtime simulation ..
     if real_downtime:
         if initial_opsim is None:
             raise ValueError("If real_downtime is True, initial_opsim must be provided.")
 
+    # Downtime_start_day_obs == day to start *simulated* downtime
+    if downtime_start_day_obs is None:
+        # So if it is not set, figure out when it should be
+        if real_downtime is False:
+            # Start first sim day if we're not using real downtime
+            downtime_start_day_obs = day_obs
+        else:
+            # Start last real data day if we're using real downtime
+            q: pd.DataFrame = initial_opsim
+            t_last_visit = Time(int(q.obs_end_mjd.max() - 0.5), format="mjd", scale="tai")
+            downtime_start_day_obs = t_last_visit.iso[0:10].replace("-", "")
+
     survey_info = lsst_support.survey_times(
-        day_obs=day_obs,
+        downtime_start_day_obs=downtime_start_day_obs,
         add_downtime=add_downtime,
         real_downtime=real_downtime,
         visits=initial_opsim,
+        survey_start_mjd=survey_start_mjd,
     )
     survey_info["nside"] = nside
 
@@ -433,9 +553,23 @@ def setup_observatory(
     survey_info.update(lsst_support.survey_footprint(nside=nside))
 
     # Now that we have downtime, set up model observatory.
-    observatory = lsst_support.setup_observatory_summit(
-        survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
-    )
+    if baseline_observatory:
+        # Now that we have downtime, set up model observatory.
+        observatory = lsst_support.setup_observatory_simulation(
+            survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
+        )
+        LOGGER.info("Set up baseline observatory.")
+    else:
+        # summit observatory
+        observatory = lsst_support.setup_observatory_summit(
+            survey_info,
+            seeing=seeing,
+            add_clouds=add_clouds,
+            too_server=too_server,
+            time_setup=rn_dayobs.day_obs_to_time(day_obs),
+        )
+        LOGGER.info("Set up summit observatory.")
+
     return observatory, survey_info
 
 
@@ -552,72 +686,6 @@ def run_sim(
     return sim_observations, scheduler, observatory, rewards, obs_rewards, survey_info
 
 
-def simple_sim(
-    day_obs: int,
-    sim_nights: int,
-    tokenfile: str | None = None,
-    site: str = "usdf",
-) -> tuple[pd.DataFrame, dict]:
-    """Run a basic simulation starting at day_obs, running for sim_nights.
-    With downtime and weather.
-
-    Parameters
-    ----------
-    day_obs
-        The integer day_obs on which to start the simulation.
-    sim_nights
-        The number of nights to run the simulation. If None, then run
-        to the end of survey specified in survey_info.
-    tokenfile
-        Path to the RSP tokenfile.
-        See also `rubin_nights.connections.get_access_token`.
-        Default None will use `ACCESS_TOKEN` environment variable.
-    site
-        The site (`usdf`, `usdf-dev`, `summit` ..) location at
-        which to query services. Must match tokenfile origin.
-
-    Returns
-    -------
-    visits, survey_info : `pd.DataFrame`, `dict`
-    """
-    initial_opsim = fetch_previous_visits(
-        day_obs=day_obs, tokenfile=tokenfile, site=site, convert_to_opsim=True
-    )
-    scheduler, initial_opsim, nside = setup_scheduler(
-        config_script_path=CONFIG_SCRIPT_PATH,
-        config_ddf_script_path=CONFIG_DDF_SCRIPT_PATH,
-        day_obs=day_obs,
-        initial_opsim=initial_opsim,
-    )
-
-    band_scheduler = setup_band_scheduler()
-
-    observatory, survey_info = setup_observatory(
-        day_obs=day_obs,
-        nside=nside,
-        add_downtime=True,
-        add_clouds=True,
-        seeing=None,
-        real_downtime=True,
-        initial_opsim=initial_opsim,
-    )
-
-    sim_observations, scheduler, observatory, rewards, obs_rewards, survey_info = run_sim(
-        scheduler=scheduler,
-        band_scheduler=band_scheduler,
-        observatory=observatory,
-        survey_info=survey_info,
-        day_obs=day_obs,
-        sim_nights=sim_nights,
-        keep_rewards=False,
-    )
-
-    filename = f"lsst_{day_obs}_{sim_nights}.db"
-    visits = lsst_support.save_opsim(observatory, sim_observations, initial_opsim, filename)
-
-    return visits, survey_info
-
-
 def fetch_lsst_visits_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Query the consdb for completed LSST visits")
     parser.add_argument("day_obs", type=int, help="Day_obs before which to query.")
@@ -633,7 +701,7 @@ def fetch_lsst_visits_cli(cli_args: list = []) -> int:
     token_file = args.token_file
     site = args.site
 
-    visits = fetch_previous_visits(day_obs, token_file, site=site)
+    visits = fetch_previous_visits(day_obs, token_file, site=site, fetch_with_tap=False)
     if visits is None:
         # Make an empty pd.DataFrame with opsim column names and types.
         visits = SchemaConverter().obs2opsim(ObservationArray()[0:0])
@@ -657,11 +725,13 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     parser.add_argument(
         "--config_ddf_script",
         type=str,
-        default=CONFIG_DDF_SCRIPT_PATH,
+        default="",
         help="Path to the config script for the DDF observations for this scheduler config.",
     )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
     opsim_fname = args.opsim
+    if len(opsim_fname) == 0:
+        opsim_fname = None
     scheduler_fname = args.file_name
     scheduler_config_script = args.config_script
     scheduler_ddf_config_script = args.config_ddf_script
@@ -692,15 +762,20 @@ def make_model_observatory_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Create a pickle of a model observatory")
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
     parser.add_argument("--day_obs", type=int, default=None, help="day_obs for simulation start")
-    parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory.")
+    parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory")
     parser.add_argument(
-        "--include-downtime", action="store_true", dest="include_downtime", help="Include scheduled downtime"
+        "--include-downtime",
+        action="store_true",
+        dest="include_downtime",
+        help="Include scheduled and unscheduled downtime",
     )
-    parser.add_argument("--seeing", type=float, default=0, help="Seeing to use")
+    parser.add_argument(
+        "--seeing", type=float, default=0, help="Use a fixed value for the atmospheric seeing"
+    )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
-    if args.day_obs is None:
-        day_obs = rn_dayobs.today_day_obs()
+    if args.day_obs == 0 or args.day_obs is None:
+        day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.today_day_obs())
     else:
         day_obs = args.day_obs
 
@@ -746,7 +821,9 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Run an SV simulation.")
     parser.add_argument("scheduler", type=str, help="scheduler pickle file.")
     parser.add_argument("observatory", type=str, help="model observatory pickle file.")
-    parser.add_argument("initial_opsim", type=str, help="initial opsim database.")
+    parser.add_argument(
+        "initial_opsim", type=str, help="initial opsim database to include with the new simulated visits"
+    )
     parser.add_argument("day_obs", type=int, help="start day obs.")
     parser.add_argument("sim_nights", type=int, help="number of nights to run.")
     parser.add_argument("run_name", type=str, help="Run (also db output) name.")
@@ -761,9 +838,11 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
         default=1,
         help="random number seed for anomalous scatter in overhead",
     )
-    parser.add_argument("--tags", type=str, default=[], nargs="*", help="The tags on the simulation.")
+    parser.add_argument("--tags", type=str, default="", nargs="*", help="The tags on the simulation.")
     parser.add_argument("--results", type=str, default="", help="Results directory.")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
+    if args.tags == "":
+        args.tags = []
 
     with open(args.scheduler, "rb") as sched_io:
         scheduler = pickle.load(sched_io)
@@ -799,7 +878,7 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     if keep_rewards:
         scheduler.keep_rewards = keep_rewards
 
-    survey_info = lsst_support.survey_times(add_downtime=False, day_obs=day_obs)
+    survey_info = lsst_support.survey_times(add_downtime=False, downtime_start_day_obs=day_obs)
 
     LOGGER.info("Starting simulation")
     observations, scheduler, observatory, rewards, obs_rewards, survey_info = run_sim(

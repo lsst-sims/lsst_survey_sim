@@ -1,0 +1,84 @@
+name: Run Tests and Publish PyPI
+
+on:
+  # Run job at the end of each day
+  schedule:
+    - cron: "0 0 * * *"
+  # Run on push to main or a tag
+  push:
+    tags:
+      - "*"
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  # run by hand
+  workflow_dispatch:
+
+
+jobs:
+  tests:
+    name: Run Unit Tests (${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-latest"]
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+          miniforge-version: latest
+          channels: conda-forge, defaults
+          show-channel-urls: true
+
+      - name: configure conda and install requirements
+        shell: bash -l {0}
+        run: |
+          conda install --yes --file=requirements.txt
+          conda install --yes --file=test-requirements.txt
+          pip install lsst.resources
+
+      - name: install lsst_survey_sim
+        shell: bash -l {0}
+        run: |
+          echo `pwd`
+          ls ${{ github.workspace }}
+          python -m pip install -e . 
+
+      - name: Access rubin-sim-data cache
+        id: cache-rs
+        uses: actions/cache@v4
+        env:
+          cache-name: cached-rubin-sim-data
+        with:
+          path: ~/rubin_sim_data
+          key: ${{ env.cache-name }}
+          restore-keys: |
+            ${{ env.cache-name }}
+
+      - name: Update rubin-sim-data if needed
+        shell: bash -l {0}
+        run: |
+          export RUBIN_SIM_DATA_DIR=~/rubin_sim_data
+          # Download anything that is not current
+          scheduler_download_data --tdqm_disable --update
+
+      - name: conda list
+        shell: bash -l {0}
+        run: conda list
+
+      - name: run tests
+        shell: bash -l {0}
+        run: |
+          export RUBIN_SIM_DATA_DIR=~/rubin_sim_data
+          pytest -r a -v --cov=lsst_survey_sim --cov=tests --cov-report=xml --cov-report=term --cov-branch
+
+      - name: Upload coverage to codecov
+        uses: codecov/codecov-action@v2
+        with:
+          file: coverage.xml

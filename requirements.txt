@@ -1,10 +1,14 @@
 astroplan
 astropy-base
+botocore
+boto3
+click
 healpy
 matplotlib-base
-numpy
+numpy <2.4
 pandas
-rubin-nights >=0.7.0
+psycopg2
+rubin-nights >=0.10.0
 rubin-scheduler =3.20.1
-rubin-sim >=2.6.0
-schedview >=0.20.0
+rubin-sim >=2.6.1
+
