@@ -1,5 +1,5 @@
 [project]
-title = "lsst-survey=sim"
+title = "lsst_survey_sim"
 copyright = "2023 Association of Universities for Research in Astronomy, Inc. (AURA)"
 base_url = "https://lsst-survey-sim.lsst.io"
 github_url = "https://github.com/lsst/lsst_survey_sim"
