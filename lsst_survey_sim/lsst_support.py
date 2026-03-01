@@ -303,9 +303,11 @@ def survey_times(
         # Placeholder if we want to put in known upcoming weather
         # problems for simulations (or scheduled maintenance)
         weather_starts: list[Time] = [
+            Time("2026-03-04T12:00:00", scale="utc"),
             Time("2026-06-19T12:00:00", scale="utc"),  # ~ June shutdown
         ]
         weather_ends: list[Time] = [
+            Time("2026-03-05T12:00:00", scale="utc"),
             Time("2026-07-04T12:00:00", scale="utc"),  # ~ June shutdown
         ]
 
