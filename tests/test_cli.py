@@ -1,17 +1,19 @@
 import os
 import pickle
+import sqlite3
 import subprocess
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 
+import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
 from astropy.time import Time
 from rubin_scheduler.scheduler.model_observatory.model_observatory import ModelObservatory
 from rubin_scheduler.scheduler.schedulers.core_scheduler import CoreScheduler
 from rubin_scheduler.scheduler.schedulers.filter_scheduler import BandSwapScheduler
-from rubin_scheduler.scheduler.utils import SchemaConverter
+from rubin_scheduler.scheduler.utils import ObservationArray, SchemaConverter
 from rubin_scheduler.utils import SURVEY_START_MJD
 
 from lsst_survey_sim import simulate_lsst
@@ -29,6 +31,20 @@ def temp_cwd() -> Iterator:
 
 
 class TestCLI(unittest.TestCase):
+
+    @unittest.skip("need vcr")
+    def test_summit_database_cli(self) -> None:
+        with temp_cwd():
+            dbname = "test_summit.db"
+            args = [dbname, None, "usdf"]
+            return_status = simulate_lsst.summit_database_cli(args)
+            assert return_status == 0
+
+            conn = sqlite3.connect(dbname)
+            visits = pd.read_sql("select * from observations", conn)
+            vobs = SchemaConverter().opsimdf2obs(visits)
+            obs_array_columns = ObservationArray().dtype.names
+            assert set(obs_array_columns) == set(vobs.dtype.names)
 
     @unittest.skip("redundant")
     def test_make_scheduler_cli(self) -> None:
