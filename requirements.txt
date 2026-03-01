@@ -5,10 +5,10 @@ boto3
 click
 healpy
 matplotlib-base
-numpy <2.4
+numpy
 pandas
 psycopg2
-rubin-nights >=0.10.0
-rubin-scheduler =3.20.1
+rubin-nights >=0.12.0
+rubin-scheduler =3.21.1
 rubin-sim >=2.6.1
 
