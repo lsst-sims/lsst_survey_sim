@@ -73,7 +73,7 @@ pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_S
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
 TS_CONFIG_SCHEDULER_REFERENCE="develop"
-SCHED_CONFIG_FNAME="ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey_block_421.py"
+SCHED_CONFIG_FNAME="ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
 echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
 git clone --depth 1 https://github.com/lsst-ts/ts_config_scheduler
 cd ts_config_scheduler
