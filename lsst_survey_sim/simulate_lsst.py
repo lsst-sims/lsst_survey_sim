@@ -57,9 +57,7 @@ __all__ = [
     "run_lsst_sim_cli",
 ]
 
-CONFIG_SCRIPT_PATH = (
-    "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
-)
+CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
 """Default path to default LSST survey configuration.
 """
 CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_407.py"
