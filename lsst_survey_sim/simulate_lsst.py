@@ -49,6 +49,7 @@ __all__ = [
     "setup_band_scheduler",
     "setup_observatory",
     "run_sim",
+    "summit_database_cli",
     "fetch_lsst_visits_cli",
     "make_lsst_scheduler_cli",
     "make_model_observatory_cli",
@@ -56,12 +57,10 @@ __all__ = [
     "run_lsst_sim_cli",
 ]
 
-CONFIG_SCRIPT_PATH = (
-    "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey_block_419.py"
-)
+CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
 """Default path to default LSST survey configuration.
 """
-CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_419.py"
+CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_407.py"
 
 SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
 """Science_program values to include for the default LSST survey visits.
@@ -684,6 +683,42 @@ def run_sim(
         obs_rewards = []
 
     return sim_observations, scheduler, observatory, rewards, obs_rewards, survey_info
+
+
+def summit_database_cli(cli_args: list = []) -> int:
+    parser = argparse.ArgumentParser(description="Create an update for the summit sqlite database")
+    parser.add_argument("file_name", type=str, help="Name of opsim db file to write.")
+    parser.add_argument("token_file", type=str, help="File with USDF access token")
+    parser.add_argument(
+        "--site", type=str, default="usdf", help="site of consdb to query (usdf, usdf-dev, or summit)"
+    )
+    args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
+
+    file_name = args.file_name
+    token_file = args.token_file
+    site = args.site
+
+    # Always fetch up to and including today
+    day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.tomorrow_day_obs())
+    visits = fetch_previous_visits(day_obs, token_file, site=site, fetch_with_tap=False)
+
+    sc = SchemaConverter()
+    if visits is None:
+        # Make an empty pd.DataFrame with opsim column names and types.
+        visits = sc.obs2opsim(ObservationArray()[0:0])
+    else:
+        # Remove extra columns by round-tripping through SchemaConverter
+        vobs = sc.opsimdf2obs(visits)
+        visits = sc.obs2opsim(vobs)
+
+    # Summit (as of cycle 43 / Feb 26, 2026) needs 'note'
+    # in addition to 'scheduler_note'
+    visits["note"] = visits.scheduler_note.copy()
+
+    with sqlite3.connect(file_name) as connection:
+        visits.to_sql("observations", connection, index=False)
+
+    return 0
 
 
 def fetch_lsst_visits_cli(cli_args: list = []) -> int:
