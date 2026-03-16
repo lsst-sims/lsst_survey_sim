@@ -113,7 +113,7 @@ for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_
 
 echo "Creating model observatory"
 date --iso=s
-make_model_observatory observatory.p
+make_model_observatory observatory.p --seeing 0.62
 for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
 
 echo "Creating the band scheduler"
@@ -261,7 +261,48 @@ vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
 rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
-rm observatory.p scheduler.p
+rm observatory.p
+
+# Run a simulation with poor seeing
+
+# Generate an observatory with zenith 500nm seeing of 1.2
+make_model_observatory observatory_seeing120.p --seeing 1.2
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
+
+OPSIMRUN="prenight_seeing120_$(date --iso=s)"
+LABEL="Nominal start and overhead, seeing=1.2, run at $(date --iso=s)"
+date --iso=s
+run_lsst_sim scheduler.p observatory_seeing120.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
+  --keep_rewards --label "${LABEL}" \
+  --delay 0 --anom_overhead_scale 0 \
+  --results ${OPSIM_RESULT_DIR}
+
+echo "Creating entry in metadatdata database"
+date --iso=s
+SIM_UUID=$(vseqarchive record-visitseq-metadata \
+    simulations \
+    ${OPSIM_RESULT_DIR}/opsim.db \
+    "${LABEL}" \
+    --first_day_obs ${DAYOBS} \
+    --last_day_obs ${LAST_DAYOBS}
+    )
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
+
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
+vseqarchive tag ${SIM_UUID} prenight seeing120 nominal rewards
+
+CONDA_HASH=$(vseqarchive record-conda-env)
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
+
+vseqarchive get-file ${SIM_UUID} visits visits.h5
+vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
+
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+
+rm observatory_seeing120.p scheduler.p
 
 for DAYOBS_TO_INDEX in ${DAYOBS_SIMULATED}; do
   vseqarchive make-prenight-index ${DAYOBS_TO_INDEX} simonyi
