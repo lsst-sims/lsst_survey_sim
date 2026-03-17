@@ -91,6 +91,7 @@ export NEXT_DAYOBS="$(date -u --date='+12 hours' +'%Y%m%d')"
 export LAST_DAYOBS="$(date -u --date='+36 hours' +'%Y%m%d')"
 export DAYOBS_SIMULATED="$DAYOBS $NEXT_DAYOBS $LAST_DAYOBS"
 export LASTNIGHTISO="$(date --date='-36 hours' -u +'%F')"
+export RUBIN_SCHEDULER_VERSION="$(conda list rubin-scheduler --json | jq -r '.[0].version')"
 
 export ARCHIVE="s3://rubin:rubin-scheduler-prenight/opsim/vseq/"
 export VSARCHIVE_PGDATABASE="opsim_log"
@@ -152,7 +153,7 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal
 
@@ -186,7 +187,7 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal rewards
@@ -225,7 +226,7 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
     )
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal delay_${DELAY}
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -257,7 +258,7 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
     )
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal anomalous_overhead
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -294,7 +295,7 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight seeing120 nominal rewards
