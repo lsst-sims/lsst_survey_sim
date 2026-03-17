@@ -50,15 +50,20 @@ mkdir ${WORK_DIR}
 for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rwX ${WORK_DIR} ; done
 cd ${WORK_DIR}
 
-# Install required python packages in a new venv
-# The true environment is from the venv created below,
-# but we need a python in the path to create the
-# venv to begin with, so we source loadLSST.sh.
+# Install required python packages in a new conda env.
+# The true environment is from the one created below,
+# but we source loadLSST.sh first to get conda into
+# our path.
+# Using a plain (non-conda) env would mostly work,
+# but using a conda env better supports getting
+# more version information into the simulation
+# metadata database, even though the packages
+# involved will be installed with pip.
 source /sdf/group/rubin/sw/w_latest/loadLSST.sh
 PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/${USER:0:1}/${USER}/prenight_venvs/prenight-${WORK_DATE}-XXXXXX)
-python -m venv "${PRENIGHT_VENV}"
+conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
-source "${PRENIGHT_VENV}/bin/activate"
+conda activate "${PRENIGHT_VENV}"
 
 if false ; then
   # Get latest tagged version lsst_survey_sim (and its dependencies)
