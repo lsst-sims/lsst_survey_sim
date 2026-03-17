@@ -78,12 +78,19 @@ pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_S
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
 TS_CONFIG_SCHEDULER_REFERENCE="develop"
-SCHED_CONFIG_FNAME="ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+RELATIVE_SCHED_CONFIG_FNAME="Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+SCHED_CONFIG_FNAME="ts_config_scheduler/${RELATIVE_SCHED_CONFIG_FNAME}"
 echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
-git clone --depth 1 https://github.com/lsst-ts/ts_config_scheduler
+SCHED_CONFIG_REPO_BASE="https://github.com/lsst-ts/ts_config_scheduler"
+git clone --depth 1 "${SCHED_CONFIG_REPO_BASE}"
 cd ts_config_scheduler
 git fetch --depth 1 origin "${TS_CONFIG_SCHEDULER_REFERENCE}"
 git checkout FETCH_HEAD
+
+# Get the URL for archiving
+SCHED_CONFIG_HASH=$(git rev-parse HEAD)
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
+
 cd ${WORK_DIR}
 
 export DAYOBS="$(date -u --date='-12 hours' +'%Y%m%d')"
@@ -98,6 +105,9 @@ export VSARCHIVE_PGDATABASE="opsim_log"
 export VSARCHIVE_PGHOST="usdf-maf-visit-seq-archive-tx.sdf.slac.stanford.edu"
 export VSARCHIVE_PGUSER="writer"
 export VSARCHIVE_PGSCHEMA="vsmd"
+
+# Saving the conda environment specification
+export CONDA_ENV_HASH=$(vseqarchive record-conda-env)
 
 echo "Fetching completed visits"
 date --iso=s
@@ -154,6 +164,8 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETE
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
 vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal
 
@@ -188,6 +200,8 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETE
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
 vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal rewards
@@ -227,6 +241,8 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal delay_${DELAY}
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -259,6 +275,8 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal anomalous_overhead
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -296,6 +314,8 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETE
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
 vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight seeing120 nominal rewards
