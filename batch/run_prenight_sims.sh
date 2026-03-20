@@ -50,15 +50,20 @@ mkdir ${WORK_DIR}
 for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rwX ${WORK_DIR} ; done
 cd ${WORK_DIR}
 
-# Install required python packages in a new venv
-# The true environment is from the venv created below,
-# but we need a python in the path to create the
-# venv to begin with, so we source loadLSST.sh.
+# Install required python packages in a new conda env.
+# The true environment is from the one created below,
+# but we source loadLSST.sh first to get conda into
+# our path.
+# Using a plain (non-conda) env would mostly work,
+# but using a conda env better supports getting
+# more version information into the simulation
+# metadata database, even though the packages
+# involved will be installed with pip.
 source /sdf/group/rubin/sw/w_latest/loadLSST.sh
 PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/${USER:0:1}/${USER}/prenight_venvs/prenight-${WORK_DATE}-XXXXXX)
-python -m venv "${PRENIGHT_VENV}"
+conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
-source "${PRENIGHT_VENV}/bin/activate"
+conda activate "${PRENIGHT_VENV}"
 
 if false ; then
   # Get latest tagged version lsst_survey_sim (and its dependencies)
@@ -73,12 +78,19 @@ pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_S
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
 TS_CONFIG_SCHEDULER_REFERENCE="develop"
-SCHED_CONFIG_FNAME="ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+RELATIVE_SCHED_CONFIG_FNAME="Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
+SCHED_CONFIG_FNAME="ts_config_scheduler/${RELATIVE_SCHED_CONFIG_FNAME}"
 echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
-git clone --depth 1 https://github.com/lsst-ts/ts_config_scheduler
+SCHED_CONFIG_REPO_BASE="https://github.com/lsst-ts/ts_config_scheduler"
+git clone --depth 1 "${SCHED_CONFIG_REPO_BASE}"
 cd ts_config_scheduler
 git fetch --depth 1 origin "${TS_CONFIG_SCHEDULER_REFERENCE}"
 git checkout FETCH_HEAD
+
+# Get the URL for archiving
+SCHED_CONFIG_HASH=$(git rev-parse HEAD)
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
+
 cd ${WORK_DIR}
 
 export DAYOBS="$(date -u --date='-12 hours' +'%Y%m%d')"
@@ -86,12 +98,16 @@ export NEXT_DAYOBS="$(date -u --date='+12 hours' +'%Y%m%d')"
 export LAST_DAYOBS="$(date -u --date='+36 hours' +'%Y%m%d')"
 export DAYOBS_SIMULATED="$DAYOBS $NEXT_DAYOBS $LAST_DAYOBS"
 export LASTNIGHTISO="$(date --date='-36 hours' -u +'%F')"
+export RUBIN_SCHEDULER_VERSION="$(conda list rubin-scheduler --json | jq -r '.[0].version')"
 
 export ARCHIVE="s3://rubin:rubin-scheduler-prenight/opsim/vseq/"
 export VSARCHIVE_PGDATABASE="opsim_log"
 export VSARCHIVE_PGHOST="usdf-maf-visit-seq-archive-tx.sdf.slac.stanford.edu"
 export VSARCHIVE_PGUSER="writer"
 export VSARCHIVE_PGSCHEMA="vsmd"
+
+# Saving the conda environment specification
+export CONDA_ENV_HASH=$(vseqarchive record-conda-env)
 
 echo "Fetching completed visits"
 date --iso=s
@@ -113,7 +129,8 @@ for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_
 
 echo "Creating model observatory"
 date --iso=s
-make_model_observatory observatory.p
+# Use the seeing value from line 2 of table 9 of LPM-017
+make_model_observatory observatory.p --seeing 0.6
 for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
 
 echo "Creating the band scheduler"
@@ -147,7 +164,9 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal
 
@@ -181,7 +200,9 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
 
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal rewards
@@ -220,7 +241,9 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
     )
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal delay_${DELAY}
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -252,7 +275,9 @@ SIM_UUID=$(vseqarchive record-visitseq-metadata \
     )
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
 vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
-vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_REFERENCE}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal anomalous_overhead
 vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
@@ -261,7 +286,93 @@ vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
 rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
-rm observatory.p scheduler.p
+rm observatory.p
+
+# Run a simulation with good seeing
+# Use the value from line 1 of table 9 of LPM-017
+# Generate an observatory with zenith 500nm seeing of 0.44
+make_model_observatory observatory_seeing044.p --seeing 0.44
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
+
+OPSIMRUN="prenight_seeing130_$(date --iso=s)"
+LABEL="Nominal start and overhead, seeing=0.44, run at $(date --iso=s)"
+date --iso=s
+run_lsst_sim scheduler.p observatory_seeing044.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
+  --keep_rewards --label "${LABEL}" \
+  --delay 0 --anom_overhead_scale 0 \
+  --results ${OPSIM_RESULT_DIR}
+
+echo "Creating entry in metadatdata database"
+date --iso=s
+SIM_UUID=$(vseqarchive record-visitseq-metadata \
+    simulations \
+    ${OPSIM_RESULT_DIR}/opsim.db \
+    "${LABEL}" \
+    --first_day_obs ${DAYOBS} \
+    --last_day_obs ${LAST_DAYOBS}
+    )
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
+
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
+vseqarchive tag ${SIM_UUID} prenight seeing044 nominal rewards
+
+CONDA_HASH=$(vseqarchive record-conda-env)
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
+
+vseqarchive get-file ${SIM_UUID} visits visits.h5
+vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
+
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+
+rm observatory_seeing044.p
+
+# Run a simulation with poor seeing
+# Make it high enough that the template tier is never triggered
+# Generate an observatory with zenith 500nm seeing of 1.3
+make_model_observatory observatory_seeing130.p --seeing 1.3
+for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
+
+OPSIMRUN="prenight_seeing130_$(date --iso=s)"
+LABEL="Nominal start and overhead, seeing=1.3, run at $(date --iso=s)"
+date --iso=s
+run_lsst_sim scheduler.p observatory_seeing130.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
+  --keep_rewards --label "${LABEL}" \
+  --delay 0 --anom_overhead_scale 0 \
+  --results ${OPSIM_RESULT_DIR}
+
+echo "Creating entry in metadatdata database"
+date --iso=s
+SIM_UUID=$(vseqarchive record-visitseq-metadata \
+    simulations \
+    ${OPSIM_RESULT_DIR}/opsim.db \
+    "${LABEL}" \
+    --first_day_obs ${DAYOBS} \
+    --last_day_obs ${LAST_DAYOBS}
+    )
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_visitseq_uuid ${COMPLETED}
+vseqarchive update-visitseq-metadata ${SIM_UUID} parent_last_day_obs ${LASTNIGHTISO}
+
+vseqarchive update-visitseq-metadata ${SIM_UUID} scheduler_version "${RUBIN_SCHEDULER_VERSION}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 "${CONDA_ENV_HASH}"
+vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}"
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
+vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/rewards.h5 rewards --archive-base ${ARCHIVE}
+vseqarchive tag ${SIM_UUID} prenight seeing130 nominal rewards
+
+CONDA_HASH=$(vseqarchive record-conda-env)
+vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
+
+vseqarchive get-file ${SIM_UUID} visits visits.h5
+vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
+
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+
+rm observatory_seeing130.p scheduler.p
 
 for DAYOBS_TO_INDEX in ${DAYOBS_SIMULATED}; do
   vseqarchive make-prenight-index ${DAYOBS_TO_INDEX} simonyi
