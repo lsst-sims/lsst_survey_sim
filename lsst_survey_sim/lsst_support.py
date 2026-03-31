@@ -305,10 +305,22 @@ def survey_times(
         weather_starts: list[Time] = [
             Time("2026-03-04T12:00:00", scale="utc"),
             Time("2026-06-19T12:00:00", scale="utc"),  # ~ June shutdown
+            Time("2026-04-15T12:00:00", scale="utc"),
+            Time("2026-05-12T12:00:00", scale="utc"),
+            Time("2026-07-15T12:00:00", scale="utc"),
+            Time("2026-08-11T12:00:00", scale="utc"),
+            Time("2026-09-16T12:00:00", scale="utc"),
+            Time("2026-10-30T12:00:00", scale="utc"),
         ]
         weather_ends: list[Time] = [
             Time("2026-03-05T12:00:00", scale="utc"),
             Time("2026-07-04T12:00:00", scale="utc"),  # ~ June shutdown
+            Time("2026-04-17T12:00:00", scale="utc"),
+            Time("2026-05-13T12:00:00", scale="utc"),
+            Time("2026-07-16T12:00:00", scale="utc"),
+            Time("2026-08-13T12:00:00", scale="utc"),
+            Time("2026-09-18T12:00:00", scale="utc"),
+            Time("2026-11-02T12:00:00", scale="utc"),
         ]
 
         # Generate downtimes during downtime_start to downtime_end
@@ -664,6 +676,8 @@ def setup_observatory_summit(
 
     # Set up camera with band changetime
     observatory.setup_camera(band_changetime=120 + close_loop_filter_time, readtime=3.07)
+    # Remove close-loop optics iterations
+    observatory.observatory.setup_optics(cl_delay=[0.0, 0.0], cl_altlimit=[0.0, 9.0, 90.0])
 
     return observatory
 

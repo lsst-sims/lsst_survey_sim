@@ -181,7 +181,9 @@ def fetch_previous_visits(
         if convert_to_opsim:
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
-            visits.loc[:, "note"] = visits.loc[:, "scheduler_note"].copy()
+            # Copy scheduler_note to note so FBS doesn't complain
+            note = visits.loc[:, "scheduler_note"]
+            visits = visits.merge(note, left_index=True, right_index=True)
         t1 = time.time()
         LOGGER.debug(f"Augmenting and converting previous visits: {t1-t0} seconds.")
     else:
@@ -440,8 +442,6 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-01-13": ["u", "g", "r", "i", "z"],
         "2026-01-27": ["g", "r", "i", "z", "y"],
         "2026-03-10": ["u", "g", "r", "i", "z"],
-        "2026-03-24": ["g", "r", "i", "z", "y"],
-        "2026-04-09": ["u", "g", "r", "i", "z"],
         "2026-04-21": ["g", "r", "i", "z", "y"],
         "2026-05-12": ["u", "g", "r", "i", "z"],
         "2026-05-26": ["g", "r", "i", "z", "y"],
@@ -450,7 +450,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-07-07": ["u", "g", "r", "i", "z"],
         "2026-07-21": ["g", "r", "i", "z", "y"],
     }
-    end_date = Time("2026-03-30T12:00:00")
+    end_date = Time("2026-07-22T12:00:00")
     band_scheduler = DateSwapBandScheduler(
         swap_schedule=upcoming_schedule,
         end_date=end_date,
