@@ -450,7 +450,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-07-07": ["u", "g", "r", "i", "z"],
         "2026-07-21": ["g", "r", "i", "z", "y"],
     }
-    end_date = Time("2026-03-30T12:00:00")
+    end_date = Time("2026-07-22T12:00:00")
     band_scheduler = DateSwapBandScheduler(
         swap_schedule=upcoming_schedule,
         end_date=end_date,
