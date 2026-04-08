@@ -33,6 +33,7 @@ from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 __all__ = [
     "EXPECTED_WAIT_SETTLE",
     "CURRENT_TMA_DEFAULT",
+    "OVERHEAD_SCATTER_SCALE",
     "set_sim_flags",
     "survey_footprint",
     "survey_times",
@@ -58,6 +59,7 @@ CURRENT_TMA_DEFAULT = {
     "altitude_jerk": 8.0,
     "settle_time": EXPECTED_WAIT_SETTLE,
 }
+OVERHEAD_SCATTER_SCALE = 1.75
 
 
 def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
@@ -762,9 +764,19 @@ class SlewScatter:
         The scale for the scatter in the slew offsets (seconds).
         The offset here is implemented as the absolute value of a
         normal distribution with mean 0 and stdev = slew_scale.
+        **This meaning is different than that of the ``slew_scale``
+        parameter used in
+        `rubin_sim.sim_archive.prenight.AnomalousOverheadFunc`,
+        in which ``slew_scale`` *scales* the input slew time,
+        rather than applying an offest to it.**
+        ``slew_scale`` in *this* class maps more closely to the ``scale``
+        key of the ``scatter_kwargs`` of ``AnomalousOverheadFunc``.
     """
 
-    def __init__(self, seed: int = 42, slew_scale: float = 1.75) -> None:
+    def __init__(self, seed: int = 42, slew_scale: None | float = 1.75) -> None:
+        if slew_scale is None:
+            slew_scale = OVERHEAD_SCATTER_SCALE
+
         self.rng = np.random.default_rng(seed)
         self.slew_scale = slew_scale
 

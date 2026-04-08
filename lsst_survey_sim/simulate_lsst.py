@@ -6,7 +6,7 @@ import sqlite3
 import subprocess
 import time
 import warnings
-from typing import Any
+from typing import Any, Callable
 
 import astropy.units as u
 import git
@@ -881,6 +881,9 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     )
     parser.add_argument("--tags", type=str, default="", nargs="*", help="The tags on the simulation.")
     parser.add_argument("--results", type=str, default="", help="Results directory.")
+    parser.add_argument(
+        "--anom_overhead_scatter", type=float, default=0.0, help="absolute scatter in the overhead"
+    )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
     if args.tags == "":
         args.tags = []
@@ -909,12 +912,18 @@ def run_lsst_sim_cli(cli_args: list = []) -> int:
     telescope = args.telescope
     delay = args.delay
     anom_overhead_scale = args.anom_overhead_scale
+    anom_overhead_scatter = args.anom_overhead_scatter
     anom_overhead_seed = args.anom_overhead_seed
 
-    if anom_overhead_scale > 0:
-        anomalous_overhead_func = AnomalousOverheadFunc(anom_overhead_seed, anom_overhead_scale)
-    else:
-        anomalous_overhead_func = None
+    anomalous_overhead_func: Callable | None = None
+    anom_overhead_args = {}
+    if anom_overhead_scale != 0.0:
+        anom_overhead_args["slew_scale"] = anom_overhead_scale
+    if anom_overhead_scatter != 0.0:
+        anom_overhead_args["scatter_kwargs"] = {"scale": anom_overhead_scatter}
+    if len(anom_overhead_args) > 0:
+        anom_overhead_args["seed"] = anom_overhead_seed
+        anomalous_overhead_func = AnomalousOverheadFunc(**anom_overhead_args)
 
     if keep_rewards:
         scheduler.keep_rewards = keep_rewards
