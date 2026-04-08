@@ -33,7 +33,8 @@ from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 __all__ = [
     "EXPECTED_WAIT_SETTLE",
     "CURRENT_TMA_DEFAULT",
-    "OVERHEAD_SCATTER_SCALE" "set_sim_flags",
+    "OVERHEAD_SCATTER_SCALE",
+    "set_sim_flags",
     "survey_footprint",
     "survey_times",
     "setup_observatory_summit",
