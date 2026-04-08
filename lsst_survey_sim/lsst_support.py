@@ -33,8 +33,7 @@ from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 __all__ = [
     "EXPECTED_WAIT_SETTLE",
     "CURRENT_TMA_DEFAULT",
-    "OVERHEAD_SCATTER_SCALE"
-    "set_sim_flags",
+    "OVERHEAD_SCATTER_SCALE" "set_sim_flags",
     "survey_footprint",
     "survey_times",
     "setup_observatory_summit",
@@ -60,6 +59,7 @@ CURRENT_TMA_DEFAULT = {
     "settle_time": EXPECTED_WAIT_SETTLE,
 }
 OVERHEAD_SCATTER_SCALE = 1.75
+
 
 def set_sim_flags(day_obs: int, sim_nights: int) -> dict:
     """Set some likely flags for the observatory setup, based on
