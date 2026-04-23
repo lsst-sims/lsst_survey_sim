@@ -718,7 +718,7 @@ def summit_database_cli(cli_args: list = []) -> int:
         visits = sc.obs2opsim(vobs)
 
     # Summit (as of cycle 43 / Feb 26, 2026) needs 'note'
-    # in addition to 'scheduler_note'
+    # in addition to 'scheduler_note' (is dropped at obs2opsim step).
     visits["note"] = visits.scheduler_note.copy()
 
     with sqlite3.connect(file_name) as connection:
