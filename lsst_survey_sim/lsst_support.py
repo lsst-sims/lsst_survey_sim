@@ -247,7 +247,8 @@ def survey_times(
 
     count_start = downtime_start
     if visits is not None:
-        # But we might need sunset/rise times earlier too.
+        # But we might need sunset/rise times earlier too, to
+        # be able to split up/downtime per night.
         # Note that visits should be consdb or converted consdb -
         # so obs_end_mjd should be present regardless of name of startMJD
         if "obs_start_mjd" in visits.columns:
@@ -258,7 +259,8 @@ def survey_times(
             visit_day_obs_start = rn_dayobs.time_to_day_obs(
                 Time(visits[obs_start_mjd_key].min(), format="mjd", scale="tai")
             )
-            count_start = rn_dayobs.day_obs_to_time(visit_day_obs_start)
+            if visit_day_obs_start < downtime_start_day_obs:
+                count_start = rn_dayobs.day_obs_to_time(visit_day_obs_start)
 
     dayobsmjd = np.arange(count_start.mjd, survey_end.mjd + 0.5, 1)
 
@@ -304,27 +306,42 @@ def survey_times(
 
         # Placeholder if we want to put in known upcoming weather
         # problems for simulations (or scheduled maintenance)
-        weather_starts: list[Time] = [
+        # Note that it's ok for these to start earlier than `count_start`
+        plan_down_starts: list[Time] = [
             Time("2026-03-04T12:00:00", scale="utc"),
-            Time("2026-06-19T12:00:00", scale="utc"),  # ~ June shutdown
             Time("2026-04-15T12:00:00", scale="utc"),
-            Time("2026-05-12T12:00:00", scale="utc"),
-            Time("2026-07-15T12:00:00", scale="utc"),
-            Time("2026-08-11T12:00:00", scale="utc"),
-            Time("2026-09-16T12:00:00", scale="utc"),
-            Time("2026-10-30T12:00:00", scale="utc"),
+            Time("2026-08-18T12:00:00", scale="utc"),  # ~ August shutdown
         ]
-        weather_ends: list[Time] = [
+        plan_down_ends: list[Time] = [
             Time("2026-03-05T12:00:00", scale="utc"),
-            Time("2026-07-04T12:00:00", scale="utc"),  # ~ June shutdown
             Time("2026-04-17T12:00:00", scale="utc"),
-            Time("2026-05-13T12:00:00", scale="utc"),
-            Time("2026-07-16T12:00:00", scale="utc"),
-            Time("2026-08-13T12:00:00", scale="utc"),
-            Time("2026-09-18T12:00:00", scale="utc"),
-            Time("2026-11-02T12:00:00", scale="utc"),
+            Time("2026-09-08T12:00:00", scale="utc"),  # ~ August shutdown
         ]
 
+        # Remove these planned downtime periods.
+        for ws, we in zip(plan_down_starts, plan_down_ends):
+            # because later we want to count time PER NIGHT,
+            # these are refactored to have start/end values on each night
+            d_starts = np.arange(ws.mjd, we.mjd - 1, 1)
+            d_ends = np.arange(ws.mjd + 1, we.mjd, 1)
+            down_starts = np.concatenate([down_starts, d_starts])
+            down_ends = np.concatenate([down_ends, d_ends])
+
+        # Add engineering time -
+        # first half of Tuesday and Thursday every week for 6 months
+        dates = pd.date_range(
+            start=pd.Timestamp(downtime_start.iso),
+            end=pd.Timestamp(downtime_start.iso) + pd.DateOffset(months=6),
+            freq="D",
+        )
+        # Filter for Tuesdays (1) and Thursdays (3)
+        eng_nights = dates[dates.weekday.isin([1, 3])]
+        eng_night_starts = Time(eng_nights).mjd
+        eng_night_ends = Time(eng_nights.mjd + 0.7, format="mjd").mjd
+        down_starts = np.concatenate([down_starts, eng_night_starts])
+        down_ends = np.concatenate([down_ends, eng_night_ends])
+
+        # Add random fault time.
         # Generate downtimes during downtime_start to downtime_end
         rng = np.random.default_rng(seed=random_seed)
 
@@ -363,21 +380,11 @@ def survey_times(
             down_starts = np.concatenate([down_starts, d_starts])
             down_ends = np.concatenate([down_ends, d_ends])
 
-        # Remove some additional whole nights for weather
-        for ws, we in zip(weather_starts, weather_ends):
-            # because later we want to count time PER NIGHT,
-            # these are refactored to have start/end values on each night
-            d_starts = np.arange(ws.mjd, we.mjd - 1, 1)
-            d_ends = np.arange(ws.mjd + 1, we.mjd, 1)
-            down_starts = np.concatenate([down_starts, d_starts])
-            down_ends = np.concatenate([down_ends, d_ends])
+        # Add standard downtime models for period AFTER downtime_end
+        # (remainder of survey).
+        scheduled_downtime = ScheduledDowntimeData(start_time=survey_start)
 
-        # Add downtime model for remainder of survey
-        scheduled_downtime = ScheduledDowntimeData(
-            start_time=survey_start,
-        )
-
-        # This may not be good for counting per night ..
+        # To help counting time per night, split into per-night.
         for ds, de in zip(scheduled_downtime.downtime["start"], scheduled_downtime.downtime["end"]):
             if ds > downtime_end and de < survey_end:
                 dsm = np.floor(ds.mjd) + 0.5
@@ -387,13 +394,15 @@ def survey_times(
                 down_starts = np.concatenate([down_starts, d_starts])
                 down_ends = np.concatenate([down_ends, d_ends])
 
-        # Need to check this matchup better. Setting the start_time to the
-        # end of the simulated downtime placed the chunks too strongly.
+        # Probably need to refactor general unscheduled downtime.
+        # Too chunky, and probably not enough of it.
         unscheduled_downtime = UnscheduledDowntimeMoreY1Data(start_time=survey_start, survey_length=3700)
-        # This may not be good for counting per night ..
+        # Count per-night.
         for ds, de in zip(unscheduled_downtime.downtime["start"], unscheduled_downtime.downtime["end"]):
             if ds > downtime_end and de < survey_end:
                 if de - ds >= TimeDelta(1, format="jd"):
+                    # Ensure these downtime start/end are on dayobs,
+                    # when the overall downtime was 1 night or more.
                     dsm = np.floor(ds.mjd) + 0.5
                     dem = np.floor(de.mjd) + 0.5
                     d_starts = np.arange(dsm, dem - 1, 1)
@@ -476,7 +485,7 @@ def survey_times(
         down_ends = np.concatenate([d_ends, keep_ends])
 
     # Trim all of these to sunrise/sunset
-    # use sunsets/sunrises over the whole survey
+    # use sunsets/sunrises over the period 'downtime_obs_start'
     alm_start = np.where(abs(almanac.sunsets["sunset"] - count_start.mjd) < 0.5)[0][0]
     alm_end = np.where(abs(almanac.sunsets["sunset"] - survey_end.mjd) < 0.5)[0][0]
     evening_twi = almanac.sunsets[alm_start:alm_end]["sun_n12_setting"]
@@ -488,6 +497,10 @@ def survey_times(
     downtime_ends = []
     eps = 0.0001
     for ds, de in zip(down_starts, down_ends):
+        # If this downtime started before the range of times we're checking,
+        # skip it.
+        if ds < count_start.mjd:
+            continue
         idx = np.where(ds >= dayobsmjd)[0][-1]
         if ds < actual_sunsets[idx]:
             downtime_starts.append(actual_sunsets[idx])
