@@ -22,9 +22,8 @@ from rubin_scheduler.scheduler.utils import (
 from rubin_scheduler.site_models import (
     Almanac,
     ConstantSeeingData,
-    ScheduledDowntimeData,
     SeeingModel,
-    UnscheduledDowntimeMoreY1Data,
+    UnscheduledDowntimeData,
 )
 from rubin_scheduler.utils import DEFAULT_NSIDE, SURVEY_START_MJD, Site
 
@@ -164,9 +163,9 @@ def survey_footprint(
 
 def survey_times(
     downtime_start_day_obs: int,
-    new_downtime_ndays: float = 365.0,
+    new_downtime_ndays: float = 365.0 * 10.2,
     random_seed: int = 55,
-    minutes_after_sunset12: float = 0,
+    minutes_after_sunset12: float = 10,
     early_dome_closure: float = 0,
     add_downtime: bool = True,
     real_downtime: bool = False,
@@ -256,7 +255,7 @@ def survey_times(
         else:
             obs_start_mjd_key = "observationStartMJD"
         if add_downtime and real_downtime:
-            visit_day_obs_start = rn_dayobs.time_to_day_obs(
+            visit_day_obs_start = rn_dayobs.time_to_day_obs_int(
                 Time(visits[obs_start_mjd_key].min(), format="mjd", scale="tai")
             )
             if visit_day_obs_start < downtime_start_day_obs:
@@ -311,11 +310,29 @@ def survey_times(
             Time("2026-03-04T12:00:00", scale="utc"),
             Time("2026-04-15T12:00:00", scale="utc"),
             Time("2026-08-18T12:00:00", scale="utc"),  # ~ August shutdown
+            Time("2027-06-10T12:00:00", scale="utc"),  # y2
+            Time("2028-06-28T12:00:00", scale="utc"),  # y3
+            Time("2029-06-19T12:00:00", scale="utc"),  # y4 - 3 + 8 wk
+            Time("2030-07-03T12:00:00", scale="utc"),  # y5
+            Time("2031-07-24T12:00:00", scale="utc"),  # y6
+            Time("2032-06-15T12:00:00", scale="utc"),  # y7
+            Time("2033-06-03T12:00:00", scale="utc"),  # y8 - 3 + 8 wk
+            Time("2034-07-20T12:00:00", scale="utc"),  # y9
+            Time("2035-06-12T12:00:00", scale="utc"),  # y10
         ]
         plan_down_ends: list[Time] = [
             Time("2026-03-05T12:00:00", scale="utc"),
             Time("2026-04-17T12:00:00", scale="utc"),
             Time("2026-09-08T12:00:00", scale="utc"),  # ~ August shutdown
+            Time("2027-07-01T12:00:00", scale="utc"),
+            Time("2028-07-19T12:00:00", scale="utc"),
+            Time("2029-08-28T12:00:00", scale="utc"),
+            Time("2030-07-24T12:00:00", scale="utc"),
+            Time("2031-08-14T12:00:00", scale="utc"),
+            Time("2032-07-06T12:00:00", scale="utc"),
+            Time("2033-08-19T12:00:00", scale="utc"),
+            Time("2034-08-10T12:00:00", scale="utc"),
+            Time("2035-07-03T12:00:00", scale="utc"),
         ]
 
         # Remove these planned downtime periods.
@@ -337,9 +354,14 @@ def survey_times(
         # Filter for Tuesdays (1) and Thursdays (3)
         eng_nights = dates[dates.weekday.isin([1, 3])]
         eng_night_starts = Time(eng_nights).mjd
-        eng_night_ends = Time(eng_nights.mjd + 0.7, format="mjd").mjd
+        eng_night_ends = Time(Time(eng_nights).mjd + 0.7, format="mjd").mjd
         down_starts = np.concatenate([down_starts, eng_night_starts])
         down_ends = np.concatenate([down_ends, eng_night_ends])
+
+        # Add long-term engineering time - 1 night every 25 nights
+        eng_nights = np.arange(downtime_start.mjd, survey_end.mjd, 25)
+        down_starts = np.concatenate([down_starts, eng_nights])
+        down_ends = np.concatenate([down_ends, eng_nights + 0.99])
 
         # Add random fault time.
         # Generate downtimes during downtime_start to downtime_end
@@ -349,19 +371,24 @@ def survey_times(
         night_end = morning_twi - early_dome_closure / 24.0
 
         # Add random periods of downtime within each night,
-        # Very similar to the unscheduled downtime in
+        # Similar to the unscheduled downtime in Y1 of
         # UnscheduledDowntimeMoreY1Data but more frequent + shorter
         random_downtime = 0
         nn = len(night_start)
         for count in range(3):
-            threshold = 1.0 - (count / 4)
-            prob_down = rng.random(nn)
+            # prob_down = rng.random(nn)
+            threshold = rng.random(nn)
+            x = np.arange(0, nn, 1)
+            y = (x.max() - x - 500) ** 2 / x.max() ** 2
+            y = np.where(y > 1, 1, y)
+            lower_limit = 0.1
+            prob_down = np.where(y < lower_limit, lower_limit, y)
             # Reduced downtime to better match current (20260101) distribution
             time_down = rng.gumbel(loc=0.3, scale=0.5, size=nn)  # hours
             time_down = np.where(time_down < 0, 0, time_down)
             # apply probability of having downtime or not -
             # But always at least 2 minutes for each cycle of 'count'
-            time_down = np.where(prob_down <= threshold, time_down, 2 / 60 / 24)
+            time_down = np.where(prob_down >= threshold, time_down, 2 / 60 / 24)
             avail_in_night = (night_end - night_start) * 24
             time_down = np.where(time_down >= avail_in_night, avail_in_night, time_down)
             time_down = np.where(time_down <= 0, 3 / 60 / 24, time_down)
@@ -380,26 +407,11 @@ def survey_times(
             down_starts = np.concatenate([down_starts, d_starts])
             down_ends = np.concatenate([down_ends, d_ends])
 
-        # Add standard downtime models for period AFTER downtime_end
-        # (remainder of survey).
-        scheduled_downtime = ScheduledDowntimeData(start_time=survey_start)
-
-        # To help counting time per night, split into per-night.
-        for ds, de in zip(scheduled_downtime.downtime["start"], scheduled_downtime.downtime["end"]):
-            if ds > downtime_end and de < survey_end:
-                dsm = np.floor(ds.mjd) + 0.5
-                dem = np.floor(de.mjd) + 0.5
-                d_starts = np.arange(dsm, dem - 1, 1)
-                d_ends = np.arange(dsm + 1, dem, 1)
-                down_starts = np.concatenate([down_starts, d_starts])
-                down_ends = np.concatenate([down_ends, d_ends])
-
-        # Probably need to refactor general unscheduled downtime.
-        # Too chunky, and probably not enough of it.
-        unscheduled_downtime = UnscheduledDowntimeMoreY1Data(start_time=survey_start, survey_length=3700)
+        # Keep original unscheduled downtime (whole night's worth)
+        unscheduled_downtime = UnscheduledDowntimeData(start_time=survey_start, survey_length=3700)
         # Count per-night.
         for ds, de in zip(unscheduled_downtime.downtime["start"], unscheduled_downtime.downtime["end"]):
-            if ds > downtime_end and de < survey_end:
+            if ds > count_start and de < survey_end:
                 if de - ds >= TimeDelta(1, format="jd"):
                     # Ensure these downtime start/end are on dayobs,
                     # when the overall downtime was 1 night or more.
@@ -498,8 +510,8 @@ def survey_times(
     eps = 0.0001
     for ds, de in zip(down_starts, down_ends):
         # If this downtime started before the range of times we're checking,
-        # skip it.
-        if ds < count_start.mjd:
+        # or if it starts after the end of times: skip it.
+        if (ds < count_start.mjd) or (ds > survey_end.mjd):
             continue
         idx = np.where(ds >= dayobsmjd)[0][-1]
         if ds < actual_sunsets[idx]:
