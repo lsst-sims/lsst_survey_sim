@@ -165,7 +165,7 @@ def survey_times(
     downtime_start_day_obs: int,
     new_downtime_ndays: float = 365.0 * 10.2,
     random_seed: int = 55,
-    minutes_after_sunset12: float = 10,
+    minutes_after_sunset12: float = 0,
     early_dome_closure: float = 0,
     add_downtime: bool = True,
     real_downtime: bool = False,
