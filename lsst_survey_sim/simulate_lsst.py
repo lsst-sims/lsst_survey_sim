@@ -143,8 +143,8 @@ def fetch_previous_visits(
     Parameters
     ----------
     day_obs
-        The day_obs (integer) of the day on which to start the simulation.
-        Will fetch all science visits *up to* (<) this day_obs.
+        The max day_obs (integer) to retrieve visit information.
+        Will return visits with day_obs < day_obs.
     tokenfile
         Path to the RSP tokenfile.
         See also `rubin_nights.connections.get_access_token`.
@@ -182,7 +182,7 @@ def fetch_previous_visits(
         f"select v.*, q.* from cdb_{instrument}.visit1 as v "
         f"left join cdb_{instrument}.visit1_quicklook as q "
         f"on v.visit_id = q.visit_id "
-        f"where v.day_obs < {day_obs} "
+        f"where v.img_type = 'science' and v.day_obs < {day_obs} "
     )
     if science_programs is None:
         science_programs = SCIENCE_PROGRAMS
@@ -190,8 +190,6 @@ def fetch_previous_visits(
     query = query + f" and ({program_constraint})"
     LOGGER.info(f"Querying for visits in programs {science_programs}")
     visits = consdb.query(query)
-    # Throw out a specific subset of bad metadata
-    visits = visits.query("not (science_program == 'BLOCK-417' and img_type == 'acq')")
     LOGGER.info(f"Fetched {len(visits)} visits.")
     t1 = time.time()
     LOGGER.debug(f"Query to fetch previous visits: {t1-t0} seconds.")
