@@ -609,6 +609,7 @@ def setup_observatory_summit(
     time_setup: Time | None = None,
     expected_wait_settle: float = EXPECTED_WAIT_SETTLE,
     close_loop_filter_time: float = 0,
+    efd_client: InfluxQueryClient | None = None,
 ) -> ModelObservatory:
     """Configure a model observatory matching the velocity/acceleration/jerk
     parameters at `time_setup`.
@@ -639,6 +640,8 @@ def setup_observatory_summit(
         The extra time (in seconds) to add to a filter change to account
         for close-loop iterations.
         With 2 close-loop iterations this is currently about 210s.
+    efd_client
+        The (now-authenticated) InfluxQueryClient for the EFD database.
 
     Returns
     -------
@@ -683,9 +686,8 @@ def setup_observatory_summit(
     )
     observatory.seeing_model = seeing_model
 
-    if time_setup is not None:
+    if time_setup is not None and efd_client is not None:
         try:
-            efd_client = InfluxQueryClient("usdf")
             tma = observatory_status.get_tma_limits(
                 time_setup, time_setup + TimeDelta(1 / 24, format="jd"), efd_client
             )
@@ -699,7 +701,7 @@ def setup_observatory_summit(
             LOGGER.info("USDF EFD not accessible. Using default summit-20.")
             time_setup = None
     # "summit-20 TMA" - but this is a label from the summit, not 20% in all
-    if time_setup is None:
+    else:
         tma = CURRENT_TMA_DEFAULT
         tma["settle_time"] = expected_wait_settle
         observatory.setup_telescope(**tma)

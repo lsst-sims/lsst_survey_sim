@@ -1,4 +1,5 @@
 import argparse
+import functools
 import logging
 import os
 import pickle
@@ -65,6 +66,31 @@ CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_blo
 SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
 """Science_program values to include for the default LSST survey visits.
 """
+
+
+@functools.cache
+def get_endpoints(tokenfile: str | None = None, site: str = "usdf") -> dict:
+    """Generate and cache connections to some data services -
+    see `rubin_nights.connections.get_clients`.
+
+    Parameters
+    ----------
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
+    site
+        The site (`usdf`, `usdf-dev`, `summit` ..) location at
+        which to query services. Must match tokenfile origin.
+
+    Returns
+    -------
+    endpoints : `dict`
+        The cached endpoints to data services.
+    """
+    # Cache connection endpoints
+    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    return endpoints
 
 
 def get_config_repo(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
@@ -142,7 +168,7 @@ def fetch_previous_visits(
         Is None if no visits available.
     """
     # Get the survey visits from the ConsDB.
-    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    endpoints = get_endpoints(tokenfile=tokenfile, site=site)
     if fetch_with_tap:
         consdb = endpoints["consdb_tap"]
     else:
@@ -377,7 +403,9 @@ def setup_scheduler(
     return scheduler, initial_opsim, nside
 
 
-def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreScheduler, Conditions, int]:
+def setup_scheduler_from_snapshot(
+    time: Time, tokenfile: str | None = None, site: str = "usdf"
+) -> tuple[CoreScheduler, Conditions, int]:
     """Set up the survey scheduler from a snapshot.
 
     Fetches the most recent snapshot before `time`.
@@ -388,6 +416,10 @@ def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreS
     time
         Search for the most recent snapshot from MAINTEL queue,
         prior to `time`.
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
     site
         Which EFD and S3 site to query and fetch the snapshot from.
         Typically "usdf" but could be "summit".
@@ -398,7 +430,7 @@ def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreS
         The configured scheduler, the `Conditions` at the time of the
         snapshot, and the nside of the scheduler.
     """
-    efd_client = InfluxQueryClient(site)
+    efd_client = get_endpoints(tokenfile=tokenfile, site=site)["efd"]
     topic = "lsst.sal.Scheduler.logevent_largeFileObjectAvailable"
     snapshots = efd_client.select_top_n(topic, ["url"], num=1, time_cut=time, index=1)
     uri = snapshots["url"].iloc[-1]
@@ -471,6 +503,8 @@ def setup_observatory(
     too_server: SimTargetooServer | None = None,
     baseline_observatory: bool = False,
     survey_start_mjd: float = SURVEY_START_MJD,
+    tokenfile: str | None = None,
+    site: str = "usdf",
 ) -> tuple[ModelObservatory, dict]:
     """Set up the model observatory.
 
@@ -519,6 +553,13 @@ def setup_observatory(
     survey_start_mjd
         The nominal start of the survey. Can be derived from the scheduler.
         Here, used to help set up the downtime models.
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
+    site
+        Which EFD and S3 site to query and fetch the snapshot from.
+        Typically "usdf" but could be "summit".
 
     Returns
     -------
