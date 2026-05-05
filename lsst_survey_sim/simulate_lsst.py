@@ -43,12 +43,14 @@ LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "SCIENCE_PROGRAMS",
+    "get_endpoints",
     "get_config_repo",
     "fetch_previous_visits",
     "fetch_too_events",
     "setup_scheduler",
     "setup_band_scheduler",
     "setup_observatory",
+    "update_scheduler_start",
     "run_sim",
     "summit_database_cli",
     "fetch_lsst_visits_cli",
@@ -613,10 +615,144 @@ def setup_observatory(
             add_clouds=add_clouds,
             too_server=too_server,
             time_setup=rn_dayobs.day_obs_to_time(day_obs),
+            efd_client=get_endpoints(tokenfile=tokenfile, site=site)["efd"],
         )
         LOGGER.info("Set up summit observatory.")
 
     return observatory, survey_info
+
+
+def update_scheduler_start(
+    scheduler: CoreScheduler,
+    initial_opsim: pd.DataFrame,
+    day_obs: int,
+    run_no_downtime: bool = False,
+    start_after_last_visit: bool = False,
+    start_from_snapshot: bool = False,
+    summit_conditions: Conditions | None = None,
+) -> tuple[float, CoreScheduler]:
+    """Update the starting time and state of the scheduler.
+
+    This is intended to match summit conditions within a night.
+    For bulk updates of the scheduler during long-term simulations,
+    look at `rubin_scheduler.scheduler.restore_scheduler` instead.
+
+    Parameters
+    ----------
+    scheduler
+        The scheduler to update with new observations if relevant.
+    initial_opsim
+        The opsim-formatted dataframe of observations.
+    day_obs
+        The day_obs of the night.
+    run_no_downtime
+        Flag indicating whether or not to run the simulation with downtime.
+        If True, start at sunset. If False, advance simulation start time to
+        the first acquired visit.
+    start_after_last_visit
+        Flag indicating whether or not to add the already-acquired visits to
+        the scheduler history and then start the simulation after the
+        last acquired visit. If True, advance simulation start time to the
+        end of the last acquired visit.
+    start_from_snapshot
+        Flag indicating whether the scheduler was originally from a snapshot
+        or not. Handles acquired visits differently, as well as the time
+        update.
+    summit_conditions
+        The conditions object from the snapshot. Required,
+         if start_from_snapshot is True. Otherwise not necessary.
+
+    Returns
+    -------
+    start_mjd, scheduler : `float`, `CoreScheduler`
+        Returns the time that the simulation should start at (for run_sim),
+        and the scheduler object, potentially updated with additional acquired
+        visits.
+    """
+    # This is intended for updating the scheduler to the current time
+    # with the currently obtained observations WITHIN AN ONGOING NIGHT.
+    # (for bulk updates to the start of the night for long-term simulations,
+    # see `restore_scheduler` in rubin_scheduler).
+
+    # What *time* should we try to start the simulation?
+
+    # Start with a minimum value - -12 deg sunset
+    sunset, sunrise = rn_dayobs.day_obs_sunset_sunrise(day_obs, sun_alt=-12)
+    start_mjd = sunset.mjd - 0.1 / 24
+    tnow = Time.now().mjd
+
+    if run_no_downtime:
+        # No downtime or delay, start at sunset.
+        # We should already have turned off start_after_last_visit
+        # and snapshot max time should have been set prior to sunset.
+        start_mjd = sunset.mjd - 0.1 / 24
+        LOGGER.info(
+            f"Starting just prior to sunset {Time(start_mjd, format='mjd', scale='tai').iso} "
+            f"with no delay or downtime."
+        )
+
+    if not run_no_downtime:
+        # Check what time the first science visit occurred - start there
+        first_visit = initial_opsim.query("day_obs == @day_obs")
+        if len(first_visit) > 0:
+            start_mjd = first_visit.observationStartMJD.min()
+            LOGGER.info(
+                f"Updating to the time of the first science visit, "
+                f"{Time(start_mjd, format='mjd', scale='tai').iso}"
+            )
+        # But if there was no first visit yet, start now if it's after sunset
+        elif tnow > start_mjd:
+            start_mjd = tnow
+            LOGGER.info(f"Updated to current time {Time(start_mjd, format='mjd', scale='tai').iso}")
+
+    if start_from_snapshot:
+        # Update to the snapshot time if it's after sunset.
+        # This requires the Conditions object from the snapshot.
+        if summit_conditions is None:
+            raise ValueError("summit_conditions must be provided if start_from_snapshot is True.")
+        if summit_conditions.mjd > start_mjd:
+            start_mjd = summit_conditions.mjd
+            LOGGER.info(f"Updating to snapshot time {Time(start_mjd, format='mjd', scale='tai').iso}")
+
+    if start_after_last_visit:
+        # Ok - we're trying to not only run without downtime, but also after
+        # the last acquired visit.  We need to update the time but also
+        # add the acquired visits to the scheduler history.
+        if start_from_snapshot:
+            # Snapshots will already have most of the acquired history.
+            additional_visits = initial_opsim.query(
+                "observationStartMJD >= @summit_conditions.mjd and day_obs == @day_obs"
+            )
+            LOGGER.info(f"Adding {len(additional_visits)} visits to the snapshot")
+        else:
+            additional_visits = initial_opsim.query("day_obs == @day_obs")
+            LOGGER.info(f"Adding {len(additional_visits)} visits to scheduler to reach last visit.")
+
+        if len(additional_visits) > 0:
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                add_obs = SchemaConverter().opsimdf2obs(additional_visits)
+            try:
+                scheduler.add_observations_array(add_obs)
+            except AttributeError as e:
+                if start_from_snapshot:
+                    LOGGER.error(
+                        "Error adding observations - "
+                        "summit snapshot likely incompatible with imported rubin_scheduler version"
+                    )
+                else:
+                    LOGGER.error("Error adding observations")
+                raise e
+
+            # Update to last visit time
+            start_mjd = additional_visits.observationStartMJD.max()
+            LOGGER.info(f"Updated to last visit time {Time(start_mjd, format='mjd', scale='tai').iso}")
+        # start at least after last visit, but also don't start before 'now'
+        if tnow > start_mjd:
+            start_mjd = tnow
+            LOGGER.info(f"Updated to current time {Time(start_mjd, format='mjd', scale='tai').iso}")
+
+    return start_mjd, scheduler
 
 
 def run_sim(
