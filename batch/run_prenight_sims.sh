@@ -64,6 +64,7 @@ PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/${USER:0:1}/${USER}/prenight_venvs/
 conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
 conda activate "${PRENIGHT_VENV}"
+conda install proj
 
 if false ; then
   # Get latest tagged version lsst_survey_sim (and its dependencies)
