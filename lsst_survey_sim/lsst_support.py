@@ -319,6 +319,8 @@ def survey_times(
             Time("2033-06-03T12:00:00", scale="utc"),  # y8 - 3 + 8 wk
             Time("2034-07-20T12:00:00", scale="utc"),  # y9
             Time("2035-06-12T12:00:00", scale="utc"),  # y10
+            Time("2036-06-29T12:00:00", scale="utc"),  # y11
+            Time("2037-07-18T12:00:00", scale="utc"),  # y12
         ]
         plan_down_ends: list[Time] = [
             Time("2026-03-05T12:00:00", scale="utc"),
@@ -333,6 +335,8 @@ def survey_times(
             Time("2033-08-19T12:00:00", scale="utc"),
             Time("2034-08-10T12:00:00", scale="utc"),
             Time("2035-07-03T12:00:00", scale="utc"),
+            Time("2036-07-20T12:00:00", scale="utc"),
+            Time("2037-08-08T12:00:00", scale="utc"),
         ]
 
         # Remove these planned downtime periods.
