@@ -143,8 +143,7 @@ def fetch_previous_visits(
     Parameters
     ----------
     day_obs
-        The max day_obs (integer) to retrieve visit information.
-        Will return visits with day_obs < day_obs.
+        Return visits with day_obs < `day_obs` (integer day_obs).
     tokenfile
         Path to the RSP tokenfile.
         See also `rubin_nights.connections.get_access_token`.
@@ -207,9 +206,6 @@ def fetch_previous_visits(
         if convert_to_opsim:
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
-            # Copy scheduler_note to note so FBS doesn't complain
-            note = visits.loc[:, "scheduler_note"]
-            visits = visits.merge(note, left_index=True, right_index=True)
         t1 = time.time()
         LOGGER.debug(f"Augmenting and converting previous visits: {t1-t0} seconds.")
     else:
@@ -641,8 +637,10 @@ def update_scheduler_start(
         The scheduler to update with new observations if relevant.
     initial_opsim
         The opsim-formatted dataframe of observations.
+        This should include all observations, including observations occurring
+        after the day_obs of the start of the simulation.
     day_obs
-        The day_obs of the night.
+        The day_obs of the night to start the simulation.
     run_no_downtime
         Flag indicating whether or not to run the simulation with downtime.
         If True, start at sunset. If False, advance simulation start time to
@@ -672,15 +670,15 @@ def update_scheduler_start(
     # (for bulk updates to the start of the night for long-term simulations,
     # see `restore_scheduler` in rubin_scheduler).
 
-    # What *time* should we try to start the simulation?
+    # Determine what *time* we should try to start the simulation.
 
-    # Start with a minimum value - -12 deg sunset
+    # Start with a minimum value - just before -12 deg sunset
     sunset, sunrise = rn_dayobs.day_obs_sunset_sunrise(day_obs, sun_alt=-12)
     start_mjd = sunset.mjd - 0.1 / 24
     tnow = Time.now().mjd
 
     if run_no_downtime:
-        # No downtime or delay, start at sunset.
+        # This flag means run with no downtime or delay, start at sunset.
         # We should already have turned off start_after_last_visit
         # and snapshot max time should have been set prior to sunset.
         start_mjd = sunset.mjd - 0.1 / 24
@@ -690,20 +688,24 @@ def update_scheduler_start(
         )
 
     if not run_no_downtime:
+        # This flag means include downtime or delays.
         # Check what time the first science visit occurred - start there
-        first_visit = initial_opsim.query("day_obs == @day_obs")
-        if len(first_visit) > 0:
-            start_mjd = first_visit.observationStartMJD.min()
+        night_visits = initial_opsim.query("day_obs == @day_obs")
+        if len(night_visits) > 0:
+            start_mjd = night_visits.observationStartMJD.min()
             LOGGER.info(
                 f"Updating to the time of the first science visit, "
                 f"{Time(start_mjd, format='mjd', scale='tai').iso}"
             )
-        # But if there was no first visit yet, start now if it's after sunset
-        elif tnow > start_mjd:
+        # This handles a special case where we have not had any
+        # science visits yet, but are still within the current night -
+        # skip to the current time.
+        elif tnow > start_mjd and tnow < sunrise.mjd:
             start_mjd = tnow
             LOGGER.info(f"Updated to current time {Time(start_mjd, format='mjd', scale='tai').iso}")
 
     if start_from_snapshot:
+        # This flag means we initialized the scheduler from a snapshot.
         # Update to the snapshot time if it's after sunset.
         # This requires the Conditions object from the snapshot.
         if summit_conditions is None:
@@ -713,9 +715,11 @@ def update_scheduler_start(
             LOGGER.info(f"Updating to snapshot time {Time(start_mjd, format='mjd', scale='tai').iso}")
 
     if start_after_last_visit:
-        # Ok - we're trying to not only run without downtime, but also after
-        # the last acquired visit.  We need to update the time but also
-        # add the acquired visits to the scheduler history.
+        # This flag means we should move to the last acquired visit,
+        # adding the already-acquired visits to the scheduler history and
+        # resetting the time to the last visit time.
+        # Which visits to add depends on if we started from a snapshot or
+        # directly from the configuration.
         if start_from_snapshot:
             # Snapshots will already have most of the acquired history.
             additional_visits = initial_opsim.query(
