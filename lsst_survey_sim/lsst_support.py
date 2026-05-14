@@ -235,14 +235,14 @@ def survey_times(
     """
     warnings.filterwarnings("ignore", category=ErfaWarning)
 
-    # We need 'survey_start' to anchor normal rubin_scheduler Downtime
-    survey_start = Time(survey_start_mjd, format="mjd", scale="utc")
-    survey_end = survey_start + TimeDelta(365 * 10.2, format="jd")
     # Time limits for simulating downtime in this function.
     downtime_start = rn_dayobs.day_obs_to_time(downtime_start_day_obs)
     # Simulated downtime period,
     downtime_length = TimeDelta(new_downtime_ndays, format="jd")
     downtime_end = downtime_start + downtime_length
+    # We need 'survey_start' to anchor normal rubin_scheduler Downtime
+    survey_start = Time(survey_start_mjd, format="mjd", scale="utc")
+    survey_end = np.max([survey_start + TimeDelta(365 * 10.2, format="jd"), downtime_end])
 
     count_start = downtime_start
     if visits is not None:
