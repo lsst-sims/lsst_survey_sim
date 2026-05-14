@@ -1,4 +1,5 @@
 import argparse
+import functools
 import logging
 import os
 import pickle
@@ -42,12 +43,14 @@ LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "SCIENCE_PROGRAMS",
+    "get_endpoints",
     "get_config_repo",
     "fetch_previous_visits",
     "fetch_too_events",
     "setup_scheduler",
     "setup_band_scheduler",
     "setup_observatory",
+    "update_scheduler_start",
     "run_sim",
     "summit_database_cli",
     "fetch_lsst_visits_cli",
@@ -65,6 +68,31 @@ CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_blo
 SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
 """Science_program values to include for the default LSST survey visits.
 """
+
+
+@functools.cache
+def get_endpoints(tokenfile: str | None = None, site: str = "usdf") -> dict:
+    """Generate and cache connections to some data services -
+    see `rubin_nights.connections.get_clients`.
+
+    Parameters
+    ----------
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
+    site
+        The site (`usdf`, `usdf-dev`, `summit` ..) location at
+        which to query services. Must match tokenfile origin.
+
+    Returns
+    -------
+    endpoints : `dict`
+        The cached endpoints to data services.
+    """
+    # Cache connection endpoints
+    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    return endpoints
 
 
 def get_config_repo(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
@@ -115,8 +143,7 @@ def fetch_previous_visits(
     Parameters
     ----------
     day_obs
-        The day_obs (integer) of the day on which to start the simulation.
-        Will fetch all science visits *up to* (<) this day_obs.
+        Return visits with day_obs < `day_obs` (integer day_obs).
     tokenfile
         Path to the RSP tokenfile.
         See also `rubin_nights.connections.get_access_token`.
@@ -142,7 +169,7 @@ def fetch_previous_visits(
         Is None if no visits available.
     """
     # Get the survey visits from the ConsDB.
-    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    endpoints = get_endpoints(tokenfile=tokenfile, site=site)
     if fetch_with_tap:
         consdb = endpoints["consdb_tap"]
     else:
@@ -154,7 +181,7 @@ def fetch_previous_visits(
         f"select v.*, q.* from cdb_{instrument}.visit1 as v "
         f"left join cdb_{instrument}.visit1_quicklook as q "
         f"on v.visit_id = q.visit_id "
-        f"where v.day_obs < {day_obs} "
+        f"where v.img_type = 'science' and v.day_obs < {day_obs} "
     )
     if science_programs is None:
         science_programs = SCIENCE_PROGRAMS
@@ -162,8 +189,6 @@ def fetch_previous_visits(
     query = query + f" and ({program_constraint})"
     LOGGER.info(f"Querying for visits in programs {science_programs}")
     visits = consdb.query(query)
-    # Throw out a specific subset of bad metadata
-    visits = visits.query("not (science_program == 'BLOCK-417' and img_type == 'acq')")
     LOGGER.info(f"Fetched {len(visits)} visits.")
     t1 = time.time()
     LOGGER.debug(f"Query to fetch previous visits: {t1-t0} seconds.")
@@ -181,9 +206,6 @@ def fetch_previous_visits(
         if convert_to_opsim:
             # Convert consdb visits to opsim visits
             visits = rn_sim.consdb_to_opsim(visits)
-            # Copy scheduler_note to note so FBS doesn't complain
-            note = visits.loc[:, "scheduler_note"]
-            visits = visits.merge(note, left_index=True, right_index=True)
         t1 = time.time()
         LOGGER.debug(f"Augmenting and converting previous visits: {t1-t0} seconds.")
     else:
@@ -377,7 +399,9 @@ def setup_scheduler(
     return scheduler, initial_opsim, nside
 
 
-def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreScheduler, Conditions, int]:
+def setup_scheduler_from_snapshot(
+    time: Time, tokenfile: str | None = None, site: str = "usdf"
+) -> tuple[CoreScheduler, Conditions, int]:
     """Set up the survey scheduler from a snapshot.
 
     Fetches the most recent snapshot before `time`.
@@ -388,6 +412,10 @@ def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreS
     time
         Search for the most recent snapshot from MAINTEL queue,
         prior to `time`.
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
     site
         Which EFD and S3 site to query and fetch the snapshot from.
         Typically "usdf" but could be "summit".
@@ -398,7 +426,7 @@ def setup_scheduler_from_snapshot(time: Time, site: str = "usdf") -> tuple[CoreS
         The configured scheduler, the `Conditions` at the time of the
         snapshot, and the nside of the scheduler.
     """
-    efd_client = InfluxQueryClient(site)
+    efd_client = get_endpoints(tokenfile=tokenfile, site=site)["efd"]
     topic = "lsst.sal.Scheduler.logevent_largeFileObjectAvailable"
     snapshots = efd_client.select_top_n(topic, ["url"], num=1, time_cut=time, index=1)
     uri = snapshots["url"].iloc[-1]
@@ -471,6 +499,8 @@ def setup_observatory(
     too_server: SimTargetooServer | None = None,
     baseline_observatory: bool = False,
     survey_start_mjd: float = SURVEY_START_MJD,
+    tokenfile: str | None = None,
+    site: str = "usdf",
 ) -> tuple[ModelObservatory, dict]:
     """Set up the model observatory.
 
@@ -519,6 +549,13 @@ def setup_observatory(
     survey_start_mjd
         The nominal start of the survey. Can be derived from the scheduler.
         Here, used to help set up the downtime models.
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
+    site
+        Which EFD and S3 site to query and fetch the snapshot from.
+        Typically "usdf" but could be "summit".
 
     Returns
     -------
@@ -572,10 +609,152 @@ def setup_observatory(
             add_clouds=add_clouds,
             too_server=too_server,
             time_setup=rn_dayobs.day_obs_to_time(day_obs),
+            efd_client=get_endpoints(tokenfile=tokenfile, site=site)["efd"],
         )
         LOGGER.info("Set up summit observatory.")
 
     return observatory, survey_info
+
+
+def update_scheduler_start(
+    scheduler: CoreScheduler,
+    initial_opsim: pd.DataFrame,
+    day_obs: int,
+    run_no_downtime: bool = False,
+    start_after_last_visit: bool = False,
+    start_from_snapshot: bool = False,
+    summit_conditions: Conditions | None = None,
+) -> tuple[float, CoreScheduler]:
+    """Update the starting time and state of the scheduler.
+
+    This is intended to match summit conditions within a night.
+    For bulk updates of the scheduler during long-term simulations,
+    look at `rubin_scheduler.scheduler.restore_scheduler` instead.
+
+    Parameters
+    ----------
+    scheduler
+        The scheduler to update with new observations if relevant.
+    initial_opsim
+        The opsim-formatted dataframe of observations.
+        This should include all observations, including observations occurring
+        after the day_obs of the start of the simulation.
+    day_obs
+        The day_obs of the night to start the simulation.
+    run_no_downtime
+        Flag indicating whether or not to run the simulation with downtime.
+        If True, start at sunset. If False, advance simulation start time to
+        the first acquired visit.
+    start_after_last_visit
+        Flag indicating whether or not to add the already-acquired visits to
+        the scheduler history and then start the simulation after the
+        last acquired visit. If True, advance simulation start time to the
+        end of the last acquired visit.
+    start_from_snapshot
+        Flag indicating whether the scheduler was originally from a snapshot
+        or not. Handles acquired visits differently, as well as the time
+        update.
+    summit_conditions
+        The conditions object from the snapshot. Required,
+         if start_from_snapshot is True. Otherwise not necessary.
+
+    Returns
+    -------
+    start_mjd, scheduler : `float`, `CoreScheduler`
+        Returns the time that the simulation should start at (for run_sim),
+        and the scheduler object, potentially updated with additional acquired
+        visits.
+    """
+    # This is intended for updating the scheduler to the current time
+    # with the currently obtained observations WITHIN AN ONGOING NIGHT.
+    # (for bulk updates to the start of the night for long-term simulations,
+    # see `restore_scheduler` in rubin_scheduler).
+
+    # Determine what *time* we should try to start the simulation.
+
+    # Start with a minimum value - just before -12 deg sunset
+    sunset, sunrise = rn_dayobs.day_obs_sunset_sunrise(day_obs, sun_alt=-12)
+    start_mjd = sunset.mjd - 0.1 / 24
+    tnow = Time.now().mjd
+
+    if run_no_downtime:
+        # This flag means run with no downtime or delay, start at sunset.
+        # We should already have turned off start_after_last_visit
+        # and snapshot max time should have been set prior to sunset.
+        start_mjd = sunset.mjd - 0.1 / 24
+        LOGGER.info(
+            f"Starting just prior to sunset {Time(start_mjd, format='mjd', scale='tai').iso} "
+            f"with no delay or downtime."
+        )
+
+    if not run_no_downtime:
+        # This flag means include downtime or delays.
+        # Check what time the first science visit occurred - start there
+        night_visits = initial_opsim.query("day_obs == @day_obs")
+        if len(night_visits) > 0:
+            start_mjd = night_visits.observationStartMJD.min()
+            LOGGER.info(
+                f"Updating to the time of the first science visit, "
+                f"{Time(start_mjd, format='mjd', scale='tai').iso}"
+            )
+        # This handles a special case where we have not had any
+        # science visits yet, but are still within the current night -
+        # skip to the current time.
+        elif tnow > start_mjd and tnow < sunrise.mjd:
+            start_mjd = tnow
+            LOGGER.info(f"Updated to current time {Time(start_mjd, format='mjd', scale='tai').iso}")
+
+    if start_from_snapshot:
+        # This flag means we initialized the scheduler from a snapshot.
+        # Update to the snapshot time if it's after sunset.
+        # This requires the Conditions object from the snapshot.
+        if summit_conditions is None:
+            raise ValueError("summit_conditions must be provided if start_from_snapshot is True.")
+        if summit_conditions.mjd > start_mjd:
+            start_mjd = summit_conditions.mjd
+            LOGGER.info(f"Updating to snapshot time {Time(start_mjd, format='mjd', scale='tai').iso}")
+
+    if start_after_last_visit:
+        # This flag means we should move to the last acquired visit,
+        # adding the already-acquired visits to the scheduler history and
+        # resetting the time to the last visit time.
+        # Which visits to add depends on if we started from a snapshot or
+        # directly from the configuration.
+        if start_from_snapshot:
+            # Snapshots will already have most of the acquired history.
+            additional_visits = initial_opsim.query(
+                "observationStartMJD >= @summit_conditions.mjd and day_obs == @day_obs"
+            )
+            LOGGER.info(f"Adding {len(additional_visits)} visits to the snapshot")
+        else:
+            additional_visits = initial_opsim.query("day_obs == @day_obs")
+            LOGGER.info(f"Adding {len(additional_visits)} visits to scheduler to reach last visit.")
+
+        if len(additional_visits) > 0:
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                add_obs = SchemaConverter().opsimdf2obs(additional_visits)
+            try:
+                scheduler.add_observations_array(add_obs)
+            except AttributeError as e:
+                if start_from_snapshot:
+                    LOGGER.error(
+                        "Error adding observations - "
+                        "summit snapshot likely incompatible with imported rubin_scheduler version"
+                    )
+                else:
+                    LOGGER.error("Error adding observations")
+                raise e
+
+            # Update to last visit time
+            start_mjd = additional_visits.observationStartMJD.max()
+            LOGGER.info(f"Updated to last visit time {Time(start_mjd, format='mjd', scale='tai').iso}")
+        # start at least after last visit, but also don't start before 'now'
+        if tnow > start_mjd:
+            start_mjd = tnow
+            LOGGER.info(f"Updated to current time {Time(start_mjd, format='mjd', scale='tai').iso}")
+
+    return start_mjd, scheduler
 
 
 def run_sim(
