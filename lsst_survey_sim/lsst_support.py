@@ -349,7 +349,7 @@ def survey_times(
             down_ends = np.concatenate([down_ends, d_ends])
 
         # Add engineering time -
-        # first half of Tuesday and Thursday every week for 6 months
+        # all of Tuesday and Thursday every week for 6 months
         dates = pd.date_range(
             start=pd.Timestamp(downtime_start.iso),
             end=pd.Timestamp(downtime_start.iso) + pd.DateOffset(months=6),
@@ -358,7 +358,7 @@ def survey_times(
         # Filter for Tuesdays (1) and Thursdays (3)
         eng_nights = dates[dates.weekday.isin([1, 3])]
         eng_night_starts = Time(eng_nights).mjd
-        eng_night_ends = Time(Time(eng_nights).mjd + 0.7, format="mjd").mjd
+        eng_night_ends = Time(Time(eng_nights).mjd + 0.99, format="mjd").mjd
         down_starts = np.concatenate([down_starts, eng_night_starts])
         down_ends = np.concatenate([down_ends, eng_night_ends])
 
@@ -811,15 +811,20 @@ class SlewScatter:
         self.rng = np.random.default_rng(seed)
         self.slew_scale = slew_scale
 
-    def __call__(self, visittime: float, slewtime: float) -> float:
+    def __call__(
+        self, visittime: float | None = None, slewtime: float | None = None, obs: Observation | None = None
+    ) -> float:
         """Return a randomized offset for the visit overhead.
 
         Parameters
         ----------
-        visittime : `float`
+        visittime
             The visit time (seconds).
-        slewtime : `float`
+        slewtime
             The slew time (seconds).
+        obs
+            The full ObservationArray for the visit.
+
 
         Returns
         -------
