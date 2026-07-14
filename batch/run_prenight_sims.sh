@@ -37,6 +37,7 @@ if test ! -e ${CRONGATE} ; then
     exit 1
 fi
 
+set -euo pipefail
 set -o xtrace
 
 newgrp rubin_users
@@ -74,7 +75,7 @@ else
   LSST_SURVEY_SIM_REFERENCE="main"
 fi
 
-pip install git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE}
+pip install --ignore-installed git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE}
 
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
@@ -100,6 +101,8 @@ export LAST_DAYOBS="$(date -u --date='+36 hours' +'%Y%m%d')"
 export DAYOBS_SIMULATED="$DAYOBS $NEXT_DAYOBS $LAST_DAYOBS"
 export LASTNIGHTISO="$(date --date='-36 hours' -u +'%F')"
 export RUBIN_SCHEDULER_VERSION="$(conda list rubin-scheduler --json | jq -r '.[0].version')"
+
+
 
 export ARCHIVE="s3://rubin:rubin-scheduler-prenight/opsim/vseq/"
 export VSARCHIVE_PGDATABASE="opsim_log"
@@ -171,7 +174,7 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} config_url "${SCHED_CONFIG_URL}
 vseqarchive archive-file ${SIM_UUID} ${OPSIM_RESULT_DIR}/opsim.db visits --archive-base ${ARCHIVE}
 vseqarchive tag ${SIM_UUID} prenight ideal nominal
 
-rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+rm ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
 # Update the index here to make sure it has at least
 # the completed nominal simulation, even if something in the rest
@@ -251,7 +254,7 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
 vseqarchive get-file ${SIM_UUID} visits visits.h5
 vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
-rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
 
 ANOM_SCALE="10.0"
@@ -285,7 +288,7 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
 vseqarchive get-file ${SIM_UUID} visits visits.h5
 vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
-rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
 rm observatory.p
 
@@ -295,7 +298,7 @@ rm observatory.p
 make_model_observatory observatory_seeing044.p --seeing 0.44
 for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do setfacl -m ${SCHEDULER_GROUP_USER}:rw observatory.p ; done
 
-OPSIMRUN="prenight_seeing130_$(date --iso=s)"
+OPSIMRUN="prenight_seeing044_$(date --iso=s)"
 LABEL="Nominal start and overhead, seeing=0.44, run at $(date --iso=s)"
 date --iso=s
 run_lsst_sim scheduler.p observatory_seeing044.p "" ${DAYOBS} 3 "${OPSIMRUN}" \
@@ -328,7 +331,7 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
 vseqarchive get-file ${SIM_UUID} visits visits.h5
 vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
-rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory_seeing044.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
 rm observatory_seeing044.p
 
@@ -371,7 +374,7 @@ vseqarchive update-visitseq-metadata ${SIM_UUID} conda_env_sha256 ${CONDA_HASH}
 vseqarchive get-file ${SIM_UUID} visits visits.h5
 vseqarchive add-nightly-stats ${SIM_UUID} visits.h5 azimuth altitude
 
-rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
+rm visits.h5 ${OPSIM_RESULT_DIR}/opsim.db ${OPSIM_RESULT_DIR}/rewards.h5 ${OPSIM_RESULT_DIR}/obs_stats.txt ${OPSIM_RESULT_DIR}/observatory_seeing130.p ${OPSIM_RESULT_DIR}/scheduler.p ${OPSIM_RESULT_DIR}/sim_metadata.yaml
 
 rm observatory_seeing130.p scheduler.p
 
