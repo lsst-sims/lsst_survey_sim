@@ -38,7 +38,6 @@ if test ! -e ${CRONGATE} ; then
 fi
 
 set -euo pipefail
-set -o xtrace
 
 newgrp rubin_users
 SCHEDULER_GROUP_USERS="lynnej neilsen yoachim"
@@ -62,10 +61,12 @@ cd ${WORK_DIR}
 # involved will be installed with pip.
 source /sdf/group/rubin/sw/w_latest/loadLSST.sh
 PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/${USER:0:1}/${USER}/prenight_venvs/prenight-${WORK_DATE}-XXXXXX)
-conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13
+conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13 --quiet
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
 conda activate "${PRENIGHT_VENV}"
-conda install proj
+
+# proj not available from pip
+conda install proj --yes --quiet
 
 if false ; then
   # Get latest tagged version lsst_survey_sim (and its dependencies)
@@ -75,7 +76,11 @@ else
   LSST_SURVEY_SIM_REFERENCE="main"
 fi
 
-pip install --ignore-installed git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE}
+# If the user has packages installed locally, this can keep pip
+# from installing them, but if this is run with cron, shell
+# executables like fetch_lsst_visits will not be in the path.
+# Be sure to get all packages into the environment in PRENIGHT_VENV.
+pip install --progress-bar off --force-reinstall git+https://github.com/lsst-sims/lsst_survey_sim.git@${LSST_SURVEY_SIM_REFERENCE}
 
 # Get the scheduler configuration script
 # It lives in ts_config_scheduler
@@ -101,8 +106,6 @@ export LAST_DAYOBS="$(date -u --date='+36 hours' +'%Y%m%d')"
 export DAYOBS_SIMULATED="$DAYOBS $NEXT_DAYOBS $LAST_DAYOBS"
 export LASTNIGHTISO="$(date --date='-36 hours' -u +'%F')"
 export RUBIN_SCHEDULER_VERSION="$(conda list rubin-scheduler --json | jq -r '.[0].version')"
-
-
 
 export ARCHIVE="s3://rubin:rubin-scheduler-prenight/opsim/vseq/"
 export VSARCHIVE_PGDATABASE="opsim_log"
