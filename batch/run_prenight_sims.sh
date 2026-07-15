@@ -37,6 +37,7 @@ if test ! -e ${CRONGATE} ; then
     exit 1
 fi
 
+set -x
 set -euo pipefail
 
 newgrp rubin_users
@@ -59,11 +60,19 @@ cd ${WORK_DIR}
 # more version information into the simulation
 # metadata database, even though the packages
 # involved will be installed with pip.
+
+# loadLSST.sh fails when set -u is on
+set +u
 source /sdf/group/rubin/sw/w_latest/loadLSST.sh
+set -u
 PRENIGHT_VENV=$(mktemp -d /sdf/scratch/users/${USER:0:1}/${USER}/prenight_venvs/prenight-${WORK_DATE}-XXXXXX)
 conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13 --quiet
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
+
+echo "activating environment ${PRENIGHT_VENV}"
+set +u
 conda activate "${PRENIGHT_VENV}"
+set -u
 
 # proj not available from pip
 conda install proj --yes --quiet
