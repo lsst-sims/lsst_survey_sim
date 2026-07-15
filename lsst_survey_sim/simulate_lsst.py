@@ -65,7 +65,7 @@ CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fb
 """
 CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_407.py"
 
-SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421"]
+SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421", "BLOCK-430"]
 """Science_program values to include for the default LSST survey visits.
 """
 
@@ -474,9 +474,9 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-05-12": ["u", "g", "r", "i", "z"],
         "2026-05-26": ["g", "r", "i", "z", "y"],
         "2026-06-09": ["u", "g", "r", "i", "z"],
-        "2026-07-21": ["g", "r", "i", "z", "y"],
+        "2026-07-23": ["g", "r", "i", "z", "y"],
     }
-    end_date = Time("2026-07-22T12:00:00")
+    end_date = Time("2026-07-30T12:00:00")
     band_scheduler = DateSwapBandScheduler(
         swap_schedule=upcoming_schedule,
         end_date=end_date,
