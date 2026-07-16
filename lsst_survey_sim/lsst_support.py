@@ -309,6 +309,7 @@ def survey_times(
         plan_down_starts: list[Time] = [
             Time("2026-03-04T12:00:00", scale="utc"),
             Time("2026-04-15T12:00:00", scale="utc"),
+            Time("2026-07-15T12:00:00", scale="utc"),  # major storm
             Time("2026-08-18T12:00:00", scale="utc"),  # ~ August shutdown
             Time("2027-06-10T12:00:00", scale="utc"),  # y2
             Time("2028-06-28T12:00:00", scale="utc"),  # y3
@@ -325,6 +326,7 @@ def survey_times(
         plan_down_ends: list[Time] = [
             Time("2026-03-05T12:00:00", scale="utc"),
             Time("2026-04-17T12:00:00", scale="utc"),
+            Time("2026-07-21T12:00:00", scale="utc"),  # major storm
             Time("2026-09-08T12:00:00", scale="utc"),  # ~ August shutdown
             Time("2027-07-01T12:00:00", scale="utc"),
             Time("2028-07-19T12:00:00", scale="utc"),
