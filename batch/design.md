@@ -20,15 +20,6 @@ are typically triggered by cron.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    cron -->|sbatch| SLURM
-    SLURM --> script[batch script]
-    script --> consdb["consdb (visits)"]
-    script --> s3[S3 archive]
-    script --> metadb[metadata DB]
-```
-
 ### Data Flow
 
 1. Fetch completed visits from the consolidated database (consdb)
