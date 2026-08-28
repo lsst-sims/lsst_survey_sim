@@ -478,7 +478,85 @@ Tags requiring a Sasquatch configuration PR: `telescope`, `dayobs`. (The `simula
 
 ## 7. Acceptance Criteria and Evidence
 
-*(To be populated after implementation.)*
+### 7.1 Design Conformance (Code Inspection)
+
+All 9 steps of the implementation outline (§6.9) are verified present in the branch `tickets/LSST-3` (commit `30b2697`):
+
+| §6.9 Step | `run_prenight_sims.sh` | `run_auxtel_prenight_sims.sh` | Status |
+|---|---|---|---|
+| 1. Sasquatch constants | Lines 87–91 | Lines 84–88 | ✅ |
+| 2. `report_to_sasquatch()` function | Lines 313–393 | Lines 254–334 | ✅ |
+| 3. Preflight token validation | Lines 225–284 | Lines 176–235 | ✅ |
+| 4. Init `NOMINAL_SIM_UUID=""` | Line 671 | N/A (outer `SIM_UUID`) | ✅ |
+| 5. `LAST_SIM_UUID="${SIM_UUID}"` in function | Line 472 | N/A | ✅ |
+| 6. Capture UUID after 2nd nominal sim | Line 692 | N/A | ✅ |
+| 7. Compute visit count & download URL | Lines 761–767 | Lines 548–553 | ✅ |
+| 8. Success report before `.done` | Line 769 (`.done` at 775) | Line 556 (`.done` at 562) | ✅ |
+| 9. Failure report in `on_exit` trap | Line 479 | Line 340 | ✅ |
+
+The `report_to_sasquatch` function body is identical in both scripts (as specified in §6.2).
+
+### 7.2 Requirement Verification
+
+| Req | Criterion | Verification Method | Evidence / Instructions |
+|---|---|---|---|
+| R-1 | Simonyi success record sent to Sasquatch | Manual test | Run `run_prenight_sims.sh` to completion. Verify in Chronograf at `usdf-rsp-dev.slac.stanford.edu/chronograf` that a record appears in measurement `lsst.survey.pre_night` with `telescope=simonyi`, `dayobs` matching the simulated DAYOBS, `success=true`, and `timestamp` as an integer (Unix ms). |
+| R-2 | AuxTel success record sent to Sasquatch | Manual test | Run `run_auxtel_prenight_sims.sh` to completion. Verify in Chronograf that a record appears with `telescope=auxtel`, correct DAYOBS, `success=true`, and an integer `timestamp`. |
+| R-3 | Failure record sent on non-zero exit | Manual test | Inject a failure after trap installation (e.g., set `SCHED_CONFIG_FNAME` to a non-existent path, or `exit 1` after `preflight_check`). Verify in Chronograf that a record appears with `success=false` and an integer `timestamp`. Separately, verify that a failure *before* trap installation (e.g., missing gate file) does NOT produce a Sasquatch record. |
+| R-4 | Nominal statistics included on success | Manual test | On the success record from R-1 or R-2, verify: `total_visit_count` is a positive integer consistent with a 3-night simulation (~900–1500 visits for simonyi, fewer for auxtel), `uuid` is a valid UUID (8-4-4-4-12 hex), and `download_url` is a non-empty S3/HTTP URL. |
+| R-5 | Reporting failure does not alter script exit | Manual test | Temporarily set `SASQUATCH_URL` to an unreachable host (e.g., `https://unreachable.example.com/topics/lsst.survey`), keeping it equal to `SASQUATCH_DEV_URL` for the auth check. Run the script. Verify: (a) the script completes with exit 0, (b) `.done` marker is created, (c) a WARNING about Sasquatch reporting failure appears in the log. |
+| R-6 | No new binary dependencies | Code inspection | The function uses only `curl`, `jq`, `awk`, `date`, `printf`, `tr`, `stat`, `getfacl`, and `vseqarchive` — all already available in the script environment. `stat` and `getfacl` were already used by the simonyi script's `check_dir_ready` and are now also checked in the auxtel script's `require_commands`. ✅ |
+
+### 7.3 Manual Verification Procedure
+
+**Prerequisites:**
+- Access to S3DF with SLURM job submission.
+- The `usdf-rsp-dev` Chronograf instance is accessible.
+- The `lsst.survey` namespace is configured in Sasquatch (already done by Angelo Fausti).
+
+**Steps for R-1 / R-2 / R-4 (success path):**
+
+1. Submit the script under test:
+   ```bash
+   export DAYOBS=20260828  # or omit to use today
+   sbatch batch/run_prenight_sims.sh     # for R-1
+   sbatch batch/run_auxtel_prenight_sims.sh  # for R-2
+   ```
+2. Wait for the SLURM job to complete (check with `squeue` or inspect output file).
+3. Confirm the job exited 0 and `.done` exists in the work directory.
+4. Open Chronograf at `https://usdf-rsp-dev.slac.stanford.edu/chronograf`.
+5. Query `lsst.survey.pre_night` filtered by `telescope` and `dayobs` matching the run.
+6. Verify the record contains:
+   - `success: true`
+   - `timestamp`: integer, in reasonable range (within minutes of job completion time)
+   - `total_visit_count`: positive integer
+   - `uuid`: valid UUID format
+   - `download_url`: non-empty URL beginning with `https://` or `s3://`
+
+**Steps for R-3 (failure path):**
+
+1. Edit the script (or set an environment variable) to force a failure after `trap on_exit EXIT` but before completion. For example, add `exit 1` after the `preflight_check` call.
+2. Submit the script and wait for it to finish (non-zero exit).
+3. In Chronograf, verify a record with `success: false` and a valid `timestamp` appeared.
+4. Verify that `uuid`, `total_visit_count`, and `download_url` are absent from the failure record.
+
+**Steps for R-5 (reporting failure isolation):**
+
+1. Temporarily change both `SASQUATCH_URL` and `SASQUATCH_DEV_URL` to `https://unreachable.example.com/topics/lsst.survey`.
+2. Run the script to completion.
+3. Verify: exit status is 0, `.done` is created, and the log contains `WARNING: Sasquatch reporting failed. Continuing.`
+
+### 7.4 Scope Compliance
+
+- No changes to the Python `lsst_survey_sim` package. ✅
+- No changes to `cleanup_prenight.sh`. ✅
+- No changes to simulation logic or outputs. ✅
+- No Sasquatch alarm rules or dashboards configured. ✅
+- Only the two prenight scripts were modified. ✅
+
+### 7.5 Deviations from Design
+
+None identified. The implementation matches §6 exactly.
 
 ---
 
