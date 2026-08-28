@@ -81,6 +81,12 @@ export DAYOBS_SIMULATED="${DAYOBS} ${NEXT_DAYOBS} ${LAST_DAYOBS}"
 
 LSST_SURVEY_SIM_REFERENCE="main"
 
+readonly SASQUATCH_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
+readonly SASQUATCH_DEV_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
+readonly SASQUATCH_REQUIRE_AUTH=false
+readonly TELESCOPE="auxtel"
+SASQUATCH_TOKEN_FD=""
+
 readonly SIM_NIGHTS=3
 readonly TS_CONFIG_SCHEDULER_REFERENCE="develop"
 readonly SCHEDULER_GROUP_USERS="lynnej neilsen yoachim"
@@ -148,7 +154,7 @@ preflight_check() {
 
     require_commands \
         date id sg ls find cat mktemp mkdir ln rm chmod setfacl \
-        git curl jq df awk || {
+        git curl jq df awk stat getfacl || {
         echo "ERROR: Base dependency preflight failed." >&2
         exit 1
     }
@@ -165,6 +171,68 @@ preflight_check() {
 
     check_min_free_space_kb "${PRENIGHT_WORK_ROOT}" 5242880 "WORK_DIR" || exit 1
     check_min_free_space_kb "${PRENIGHT_VENV_ROOT}" 2097152 "PRENIGHT_VENV" || exit 1
+
+    # Sasquatch token validation.
+    # Reject unauthenticated reporting to non-dev endpoints.
+    if [ "${SASQUATCH_REQUIRE_AUTH}" != "true" ] \
+       && [ "${SASQUATCH_URL}" != "${SASQUATCH_DEV_URL}" ]; then
+        echo "ERROR: Unauthenticated Sasquatch reporting is allowed only for the development endpoint." >&2
+        exit 1
+    fi
+
+    local SASQUATCH_TOKEN_FILE="${HOME}/.lsst/sasquatch_access_token"
+    if [ -e "${SASQUATCH_TOKEN_FILE}" ] || [ -L "${SASQUATCH_TOKEN_FILE}" ]; then
+        if [ -L "${SASQUATCH_TOKEN_FILE}" ] || [ ! -f "${SASQUATCH_TOKEN_FILE}" ]; then
+            echo "ERROR: ${SASQUATCH_TOKEN_FILE} must be a non-symlink regular file." >&2
+            exit 1
+        fi
+
+        # Open once, then validate and consume this exact open file description.
+        # Opening and all later token reads occur with xtrace disabled.
+        local XTRACE_WAS_SET=false
+        [[ $- == *x* ]] && XTRACE_WAS_SET=true
+        { set +x; } 2>/dev/null
+        exec {SASQUATCH_TOKEN_FD}< "${SASQUATCH_TOKEN_FILE}"
+
+        local TOKEN_FD_PATH="/proc/$$/fd/${SASQUATCH_TOKEN_FD}"
+        local TOKEN_TYPE TOKEN_OWNER TOKEN_PERMS TOKEN_ACL
+        TOKEN_TYPE=$(stat -Lc '%F' "${TOKEN_FD_PATH}")
+        TOKEN_OWNER=$(stat -Lc '%u' "${TOKEN_FD_PATH}")
+        TOKEN_PERMS=$(stat -Lc '%a' "${TOKEN_FD_PATH}")
+        TOKEN_ACL=$(getfacl -cpL "${TOKEN_FD_PATH}")
+        if [ "${TOKEN_TYPE}" != "regular file" ]; then
+            echo "ERROR: ${SASQUATCH_TOKEN_FILE} did not open as a regular file." >&2
+            exit 1
+        fi
+        if [ "${TOKEN_OWNER}" != "$(id -u)" ]; then
+            echo "ERROR: ${SASQUATCH_TOKEN_FILE} is not owned by the effective user." >&2
+            exit 1
+        fi
+        if [ "${TOKEN_PERMS}" != "600" ] && [ "${TOKEN_PERMS}" != "400" ]; then
+            echo "ERROR: ${SASQUATCH_TOKEN_FILE} has permissions ${TOKEN_PERMS}; expected 600 or 400." >&2
+            exit 1
+        fi
+        if grep -qE '^(user|group):[^:]+' <<< "${TOKEN_ACL}"; then
+            echo "ERROR: ${SASQUATCH_TOKEN_FILE} has named ACL entries; access tokens must be private." >&2
+            exit 1
+        fi
+        # Opening /proc/self/fd/N gives awk an independent offset for the same open
+        # file description, leaving the original descriptor ready for curl.
+        if ! awk '
+            BEGIN { valid = 1 }
+            NR != 1 { valid = 0 }
+            NR == 1 && (length($0) == 0 || length($0) > 8192 ||
+                        $0 !~ /^[A-Za-z0-9._~+\/=\-]+$/) { valid = 0 }
+            END { exit !(valid && NR == 1) }
+        ' "${TOKEN_FD_PATH}"; then
+            echo "ERROR: ${SASQUATCH_TOKEN_FILE} must contain exactly one valid token of at most 8192 characters." >&2
+            exit 1
+        fi
+        [ "${XTRACE_WAS_SET}" = "true" ] && set -x
+    elif [ "${SASQUATCH_REQUIRE_AUTH}" = "true" ]; then
+        echo "ERROR: Missing required Sasquatch token file ${SASQUATCH_TOKEN_FILE}." >&2
+        exit 1
+    fi
 }
 
 # Validate that a string is a canonical UUID (8-4-4-4-12 hex chars).
@@ -183,10 +251,93 @@ grant_group_access() {
     done
 }
 
+# Report prenight simulation status to Sasquatch.
+# Arguments:
+#   $1 - success: "true" or "false"
+#   $2 - total_visit_count: integer or "" if unavailable
+#   $3 - sim_uuid: UUID string or "" if unavailable
+#   $4 - download_url: URL string or "" if unavailable
+# Uses globals: DAYOBS, SASQUATCH_URL, TELESCOPE, SASQUATCH_TOKEN_FD
+report_to_sasquatch() {
+    local SUCCESS="$1"
+    local TOTAL_VISIT_COUNT="${2:-}"
+    local NOMINAL_SIM_UUID="${3:-}"
+    local DOWNLOAD_URL="${4:-}"
+
+    # Record event time rather than relying on possibly delayed ingestion time.
+    local EVENT_TIMESTAMP_MS
+    EVENT_TIMESTAMP_MS=$(date -u +%s%3N)
+
+    # Build the value object with jq for safe JSON construction.
+    local PAYLOAD
+    PAYLOAD=$(jq -n \
+        --arg measurement "lsst.survey.pre_night" \
+        --arg telescope "${TELESCOPE}" \
+        --arg dayobs "${DAYOBS:-unknown}" \
+        --argjson timestamp "${EVENT_TIMESTAMP_MS}" \
+        --argjson success "${SUCCESS}" \
+        --arg uuid "${NOMINAL_SIM_UUID}" \
+        --arg visit_count "${TOTAL_VISIT_COUNT}" \
+        --arg download_url "${DOWNLOAD_URL}" \
+        '{
+            records: [{
+                value: (
+                    {
+                        measurement: $measurement,
+                        telescope: $telescope,
+                        dayobs: $dayobs,
+                        timestamp: $timestamp,
+                        success: $success
+                    }
+                    + (if $uuid != "" then {uuid: $uuid} else {} end)
+                    + (if $visit_count != "" then {total_visit_count: ($visit_count | tonumber)} else {} end)
+                    + (if $download_url != "" then {download_url: $download_url} else {} end)
+                )
+            }]
+        }')
+
+    log "Reporting to Sasquatch: success=${SUCCESS} visits=${TOTAL_VISIT_COUNT:-n/a} uuid=${NOMINAL_SIM_UUID:-n/a}"
+
+    # Construct a private curl config via process substitution so that
+    # neither the token nor the payload (which may contain a presigned
+    # download URL) appears in curl's argv or xtrace output.
+    local CURL_OK=false
+    local USE_TOKEN=false
+    if [ -n "${SASQUATCH_TOKEN_FD:-}" ]; then
+        USE_TOKEN=true
+    fi
+
+    local XTRACE_WAS_SET=false
+    [[ $- == *x* ]] && XTRACE_WAS_SET=true
+    { set +x; } 2>/dev/null
+    if printf '%s' "${PAYLOAD}" | curl -K <(
+        printf 'silent\nfail\noutput = /dev/null\nmax-time = 30\n'
+        printf 'request = POST\n'
+        printf 'url = "%s"\n' "${SASQUATCH_URL}"
+        printf 'header = "Content-Type: application/vnd.kafka.json.v2+json"\n'
+        if [ "${USE_TOKEN}" = "true" ]; then
+            printf 'header = "Authorization: Bearer '
+            tr -d '\r\n' <&"${SASQUATCH_TOKEN_FD}"
+            printf '"\n'
+        fi
+        printf 'data = @-\n'
+    ) 2>/dev/null; then
+        CURL_OK=true
+    fi
+    [ "${XTRACE_WAS_SET}" = "true" ] && set -x
+
+    if [ "${CURL_OK}" = "true" ]; then
+        log "Sasquatch report sent successfully."
+    else
+        echo "WARNING: Sasquatch reporting failed. Continuing." >&2
+    fi
+}
+
 on_exit() {
     local STATUS=$?
     if [ "${STATUS}" -ne 0 ]; then
         echo "run_auxtel_prenight_sims.sh FAILED with exit status ${STATUS}" >&2
+        report_to_sasquatch "false" "" "" "" || true
     fi
     echo "Design docs: https://github.com/lsst-sims/lsst_survey_sim/blob/main/batch/design.md"
     echo "******** END of run_auxtel_prenight_sims.sh (status ${STATUS}) **********"
@@ -387,6 +538,22 @@ rm -f \
 for DAYOBS_TO_INDEX in ${DAYOBS_SIMULATED}; do
     vseqarchive make-prenight-index "${DAYOBS_TO_INDEX}" auxtel
 done
+
+##############################################################################
+# Sasquatch reporting
+##############################################################################
+
+# Sum the per-night visit counts from the nightly stats (one value_name is
+# sufficient; each has the same count per night).
+NOMINAL_VISIT_COUNT=""
+NOMINAL_DOWNLOAD_URL=""
+if [ -n "${SIM_UUID}" ]; then
+    NOMINAL_VISIT_COUNT=$(vseqarchive query-nightly-stats "${SIM_UUID}" \
+        | awk -F'\t' 'NR>1 && !seen[$1]++ {sum += $3} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
+    NOMINAL_DOWNLOAD_URL=$(vseqarchive get-visitseq-url "${SIM_UUID}") || NOMINAL_DOWNLOAD_URL=""
+fi
+
+report_to_sasquatch "true" "${NOMINAL_VISIT_COUNT}" "${SIM_UUID}" "${NOMINAL_DOWNLOAD_URL}" || true
 
 ##############################################################################
 # Mark this work directory as complete for cleanup_prenight.sh
