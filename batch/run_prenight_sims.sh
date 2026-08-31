@@ -88,7 +88,7 @@ readonly SASQUATCH_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-pr
 readonly SASQUATCH_DEV_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
 readonly SASQUATCH_REQUIRE_AUTH=false
 readonly TELESCOPE="simonyi"
-SASQUATCH_TOKEN_FD=""
+SASQUATCH_TOKEN_FILE_VALIDATED=""
 
 readonly SIM_NIGHTS=3
 readonly TS_CONFIG_SCHEDULER_REFERENCE="develop"
@@ -236,23 +236,10 @@ preflight_check() {
             exit 1
         fi
 
-        # Open once, then validate and consume this exact open file description.
-        # Opening and all later token reads occur with xtrace disabled.
-        local XTRACE_WAS_SET=false
-        [[ $- == *x* ]] && XTRACE_WAS_SET=true
-        { set +x; } 2>/dev/null
-        exec {SASQUATCH_TOKEN_FD}< "${SASQUATCH_TOKEN_FILE}"
-
-        local TOKEN_FD_PATH="/proc/$$/fd/${SASQUATCH_TOKEN_FD}"
-        local TOKEN_TYPE TOKEN_OWNER TOKEN_PERMS TOKEN_ACL
-        TOKEN_TYPE=$(stat -Lc '%F' "${TOKEN_FD_PATH}")
-        TOKEN_OWNER=$(stat -Lc '%u' "${TOKEN_FD_PATH}")
-        TOKEN_PERMS=$(stat -Lc '%a' "${TOKEN_FD_PATH}")
-        TOKEN_ACL=$(getfacl -cpL "${TOKEN_FD_PATH}")
-        if [ "${TOKEN_TYPE}" != "regular file" ]; then
-            echo "ERROR: ${SASQUATCH_TOKEN_FILE} did not open as a regular file." >&2
-            exit 1
-        fi
+        local TOKEN_OWNER TOKEN_PERMS TOKEN_ACL
+        TOKEN_OWNER=$(stat -c '%u' "${SASQUATCH_TOKEN_FILE}")
+        TOKEN_PERMS=$(stat -c '%a' "${SASQUATCH_TOKEN_FILE}")
+        TOKEN_ACL=$(getfacl -cp "${SASQUATCH_TOKEN_FILE}")
         if [ "${TOKEN_OWNER}" != "$(id -u)" ]; then
             echo "ERROR: ${SASQUATCH_TOKEN_FILE} is not owned by the effective user." >&2
             exit 1
@@ -265,19 +252,24 @@ preflight_check() {
             echo "ERROR: ${SASQUATCH_TOKEN_FILE} has named ACL entries; access tokens must be private." >&2
             exit 1
         fi
-        # Opening /proc/self/fd/N gives awk an independent offset for the same open
-        # file description, leaving the original descriptor ready for curl.
+        # Validate token content with xtrace suppressed so the value is never logged.
+        local XTRACE_WAS_SET=false
+        [[ $- == *x* ]] && XTRACE_WAS_SET=true
+        { set +x; } 2>/dev/null
         if ! awk '
             BEGIN { valid = 1 }
             NR != 1 { valid = 0 }
             NR == 1 && (length($0) == 0 || length($0) > 8192 ||
                         $0 !~ /^[A-Za-z0-9._~+\/=\-]+$/) { valid = 0 }
             END { exit !(valid && NR == 1) }
-        ' "${TOKEN_FD_PATH}"; then
+        ' "${SASQUATCH_TOKEN_FILE}"; then
             echo "ERROR: ${SASQUATCH_TOKEN_FILE} must contain exactly one valid token of at most 8192 characters." >&2
             exit 1
         fi
         [ "${XTRACE_WAS_SET}" = "true" ] && set -x
+
+        # Record that the token file passed validation (store path, not content).
+        SASQUATCH_TOKEN_FILE_VALIDATED="${SASQUATCH_TOKEN_FILE}"
     elif [ "${SASQUATCH_REQUIRE_AUTH}" = "true" ]; then
         echo "ERROR: Missing required Sasquatch token file ${SASQUATCH_TOKEN_FILE}." >&2
         exit 1
@@ -316,7 +308,7 @@ update_prenight_index() {
 #   $2 - total_visit_count: integer or "" if unavailable
 #   $3 - sim_uuid: UUID string or "" if unavailable
 #   $4 - download_url: URL string or "" if unavailable
-# Uses globals: DAYOBS, SASQUATCH_URL, TELESCOPE, SASQUATCH_TOKEN_FD
+# Uses globals: DAYOBS, SASQUATCH_URL, TELESCOPE, SASQUATCH_TOKEN_FILE_VALIDATED
 report_to_sasquatch() {
     local SUCCESS="$1"
     local TOTAL_VISIT_COUNT="${2:-}"
@@ -362,7 +354,7 @@ report_to_sasquatch() {
     # download URL) appears in curl's argv or xtrace output.
     local CURL_OK=false
     local USE_TOKEN=false
-    if [ -n "${SASQUATCH_TOKEN_FD:-}" ]; then
+    if [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]; then
         USE_TOKEN=true
     fi
 
@@ -376,7 +368,7 @@ report_to_sasquatch() {
         printf 'header = "Content-Type: application/vnd.kafka.json.v2+json"\n'
         if [ "${USE_TOKEN}" = "true" ]; then
             printf 'header = "Authorization: Bearer '
-            tr -d '\r\n' <&"${SASQUATCH_TOKEN_FD}"
+            tr -d '\r\n' < "${SASQUATCH_TOKEN_FILE_VALIDATED}"
             printf '"\n'
         fi
         printf 'data = @-\n'
