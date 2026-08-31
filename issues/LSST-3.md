@@ -147,7 +147,7 @@ Added to both scripts (duplicated; these are standalone shell scripts, not a sha
 #   $2 - total_visit_count: integer or "" if unavailable
 #   $3 - sim_uuid: UUID string or "" if unavailable
 #   $4 - download_url: URL string or "" if unavailable
-# Uses globals: DAYOBS, SASQUATCH_URL, TELESCOPE
+# Uses globals: DAYOBS, SASQUATCH_URL, TELESCOPE, SASQUATCH_TOKEN_FILE_VALIDATED
 report_to_sasquatch() {
     local SUCCESS="$1"
     local TOTAL_VISIT_COUNT="${2:-}"
@@ -191,12 +191,9 @@ report_to_sasquatch() {
     # Construct a private curl config via process substitution so that
     # neither the token nor the payload (which may contain a presigned
     # download URL) appears in curl's argv or xtrace output.
-    # The token never touches a shell variable — it is spliced into the config
-    # stream from the file descriptor opened and validated by preflight. This
-    # avoids reopening the credential path after validation.
     local CURL_OK=false
     local USE_TOKEN=false
-    if [ -n "${SASQUATCH_TOKEN_FD:-}" ]; then
+    if [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]; then
         USE_TOKEN=true
     fi
 
@@ -210,7 +207,7 @@ report_to_sasquatch() {
         printf 'header = "Content-Type: application/vnd.kafka.json.v2+json"\n'
         if [ "${USE_TOKEN}" = "true" ]; then
             printf 'header = "Authorization: Bearer '
-            tr -d '\r\n' <&"${SASQUATCH_TOKEN_FD}"
+            tr -d '\r\n' < "${SASQUATCH_TOKEN_FILE_VALIDATED}"
             printf '"\n'
         fi
         printf 'data = @-\n'
@@ -234,6 +231,7 @@ readonly SASQUATCH_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-pr
 readonly SASQUATCH_DEV_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
 readonly SASQUATCH_REQUIRE_AUTH=false
 readonly TELESCOPE="simonyi"   # or "auxtel" in the auxtel script
+SASQUATCH_TOKEN_FILE_VALIDATED=""
 ```
 
 `SASQUATCH_REQUIRE_AUTH=false` is permitted only when `SASQUATCH_URL` exactly equals `SASQUATCH_DEV_URL`. A production cutover must set a production URL and `SASQUATCH_REQUIRE_AUTH=true`; changing only the URL is rejected by preflight. This prevents a production deployment from silently attempting unauthenticated reporting.
@@ -252,30 +250,16 @@ if [ "${SASQUATCH_REQUIRE_AUTH}" != "true" ] \
     exit 1
 fi
 
-SASQUATCH_TOKEN_FD=""
 if [ -e "${SASQUATCH_TOKEN_FILE}" ] || [ -L "${SASQUATCH_TOKEN_FILE}" ]; then
     if [ -L "${SASQUATCH_TOKEN_FILE}" ] || [ ! -f "${SASQUATCH_TOKEN_FILE}" ]; then
         echo "ERROR: ${SASQUATCH_TOKEN_FILE} must be a non-symlink regular file." >&2
         exit 1
     fi
 
-    # Open once, then validate and consume this exact open file description.
-    # Opening and all later token reads occur with xtrace disabled.
-    local XTRACE_WAS_SET=false
-    [[ $- == *x* ]] && XTRACE_WAS_SET=true
-    { set +x; } 2>/dev/null
-    exec {SASQUATCH_TOKEN_FD}< "${SASQUATCH_TOKEN_FILE}"
-
-    local TOKEN_FD_PATH="/proc/$$/fd/${SASQUATCH_TOKEN_FD}"
-    local TOKEN_TYPE TOKEN_OWNER TOKEN_PERMS TOKEN_ACL
-    TOKEN_TYPE=$(stat -Lc '%F' "${TOKEN_FD_PATH}")
-    TOKEN_OWNER=$(stat -Lc '%u' "${TOKEN_FD_PATH}")
-    TOKEN_PERMS=$(stat -Lc '%a' "${TOKEN_FD_PATH}")
-    TOKEN_ACL=$(getfacl -cpL "${TOKEN_FD_PATH}")
-    if [ "${TOKEN_TYPE}" != "regular file" ]; then
-        echo "ERROR: ${SASQUATCH_TOKEN_FILE} did not open as a regular file." >&2
-        exit 1
-    fi
+    local TOKEN_OWNER TOKEN_PERMS TOKEN_ACL
+    TOKEN_OWNER=$(stat -c '%u' "${SASQUATCH_TOKEN_FILE}")
+    TOKEN_PERMS=$(stat -c '%a' "${SASQUATCH_TOKEN_FILE}")
+    TOKEN_ACL=$(getfacl -cp "${SASQUATCH_TOKEN_FILE}")
     if [ "${TOKEN_OWNER}" != "$(id -u)" ]; then
         echo "ERROR: ${SASQUATCH_TOKEN_FILE} is not owned by the effective user." >&2
         exit 1
@@ -288,26 +272,31 @@ if [ -e "${SASQUATCH_TOKEN_FILE}" ] || [ -L "${SASQUATCH_TOKEN_FILE}" ]; then
         echo "ERROR: ${SASQUATCH_TOKEN_FILE} has named ACL entries; access tokens must be private." >&2
         exit 1
     fi
-    # Opening /proc/self/fd/N gives awk an independent offset for the same open
-    # file description, leaving the original descriptor ready for curl.
+    # Validate token content with xtrace suppressed so the value is never logged.
+    local XTRACE_WAS_SET=false
+    [[ $- == *x* ]] && XTRACE_WAS_SET=true
+    { set +x; } 2>/dev/null
     if ! awk '
         BEGIN { valid = 1 }
         NR != 1 { valid = 0 }
         NR == 1 && (length($0) == 0 || length($0) > 8192 ||
                     $0 !~ /^[A-Za-z0-9._~+\/=\-]+$/) { valid = 0 }
         END { exit !(valid && NR == 1) }
-    ' "${TOKEN_FD_PATH}"; then
+    ' "${SASQUATCH_TOKEN_FILE}"; then
         echo "ERROR: ${SASQUATCH_TOKEN_FILE} must contain exactly one valid token of at most 8192 characters." >&2
         exit 1
     fi
     [ "${XTRACE_WAS_SET}" = "true" ] && set -x
+
+    # Record that the token file passed validation (store path, not content).
+    SASQUATCH_TOKEN_FILE_VALIDATED="${SASQUATCH_TOKEN_FILE}"
 elif [ "${SASQUATCH_REQUIRE_AUTH}" = "true" ]; then
     echo "ERROR: Missing required Sasquatch token file ${SASQUATCH_TOKEN_FILE}." >&2
     exit 1
 fi
 ```
 
-The token value is never assigned to a shell variable, passed as an argument, or logged. Preflight opens it once and validates the opened object through `/proc/$$/fd`, including its actual type, ownership, mode, ACLs, and complete content. `report_to_sasquatch` streams that same open descriptor directly with `tr` while xtrace is disabled, eliminating a path-replacement race between validation and use. The descriptor number is non-secret and is not exported. Both scripts add `getfacl` and `stat` to their preflight command checks; this design relies on Linux procfs, which is present on the target S3DF environment.
+The token value is never assigned to a shell variable, passed as an argument, or logged. All metadata (`stat`, `getfacl`) and content (`awk`) checks run directly against the validated filesystem path — safe because symlinks have already been rejected. The content check runs under `set +x` so the token value never appears in xtrace output. `report_to_sasquatch` re-reads the file with `tr -d '\r\n' < "${SASQUATCH_TOKEN_FILE_VALIDATED}"` inside a process-substitution curl config while xtrace is still disabled, so the token is never in a shell variable, never in curl's argv, and never in logs. Both scripts add `getfacl` and `stat` to their preflight command checks.
 
 ### 6.5 Changes to `run_prenight_sims.sh`
 
