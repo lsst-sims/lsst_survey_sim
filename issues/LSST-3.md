@@ -100,6 +100,7 @@ Omitted — only one plausible design approach (HTTP POST to Sasquatch REST Prox
 - Although Sasquatch can supply ingestion time when a timestamp is omitted, prenight records explicitly include the event time as a Unix timestamp in milliseconds. This satisfies R-1--R-3 and distinguishes batch completion time from delayed ingestion time.
 - Tags (e.g., `telescope`, `simulation_type`) must be listed in the Sasquatch configuration and require a PR to add new ones.
 - The existing scripts already have `curl`, `jq`, `awk`, `stat`, and `getfacl` available (or will verify them in preflight). A consdb access token lives at `~/.lsst/usdf_access_token`; for Sasquatch reporting, a separate token at `~/.lsst/sasquatch_access_token` is used (requires `write:sasquatch` scope on prod). The token file may be absent only when the configured URL is the explicitly allow-listed development endpoint, where authentication is not enforced. All other endpoints require a token.
+- The `download_url` returned by `vseqarchive get-visitseq-url` is a public, non-signed URL — it carries no embedded credential or presigned-access token and requires no confidentiality protection. It is therefore safe to include in the Sasquatch record, to appear in script logs (including `set -x` xtrace output), and to be visible to anyone with read access to Sasquatch/Chronograf. This is distinct from the Sasquatch bearer token, which remains the only value in this design requiring confidentiality protection (never assigned to a shell variable, never in curl argv, never logged).
 - Lynne Jones is adding a `put` method to `rubin_nights` `InfluxQueryClient` on a branch, and it may eventually be the correct approach to use a corresponding command from `rubin_nights` when it is ready, but for now the bash scripts a direct `curl` POST is the appropriate approach.
 - Results can be viewed at `usdf-rsp-dev.slac.stanford.edu/chronograf`.
 - Hyphens are preferred over underscores in names that appear in URLs (per Angelo Fausti).
@@ -189,11 +190,13 @@ report_to_sasquatch() {
     log "Reporting to Sasquatch: success=${SUCCESS} visits=${TOTAL_VISIT_COUNT:-n/a} uuid=${NOMINAL_SIM_UUID:-n/a}"
 
     # Construct a private curl config via process substitution so that
-    # neither the token nor the payload (which may contain a presigned
-    # download URL) appears in curl's argv or xtrace output.
+    # the Sasquatch bearer token never appears in curl's argv or in
+    # xtrace output. (The payload itself, including any download_url,
+    # is not a secret — vseqarchive get-visitseq-url returns a public,
+    # non-signed URL — so only the token needs this protection.)
     local CURL_OK=false
     local USE_TOKEN=false
-    if [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]; then
+    if [ "${SASQUATCH_REQUIRE_AUTH}" = "true" ] && [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]; then
         USE_TOKEN=true
     fi
 
@@ -240,7 +243,11 @@ SASQUATCH_TOKEN_FILE_VALIDATED=""
 
 Both scripts' `preflight_check()` functions gain a check for `~/.lsst/sasquatch_access_token`. The file may be absent only for the allow-listed development endpoint when `SASQUATCH_REQUIRE_AUTH=false`. If present, it must be a non-symlink regular file owned by the effective user, have mode `400` or `600`, have no named POSIX ACL entries, and contain exactly one non-empty token of bounded length using the allowed character set. Every metadata, ACL, or content validation failure is a hard error: an insecure or malformed token indicates a security misconfiguration and must abort the job rather than being ignored.
 
+Preflight validates the token file whenever it is present, regardless of `SASQUATCH_REQUIRE_AUTH`, so that an insecure or malformed file is always caught early. However, `report_to_sasquatch()` only attaches an `Authorization` header when `SASQUATCH_REQUIRE_AUTH=true` (see §6.2). This prevents a bearer token from being sent unnecessarily to the unauthenticated development endpoint merely because the token file happens to exist on disk — e.g. left over from testing, or provisioned in advance of a production cutover. `SASQUATCH_TOKEN_FILE_VALIDATED` being non-empty indicates only that the file passed validation, not that it should be used; use is gated separately on the auth-required policy.
+
 R-5 applies to failures of the isolated HTTP reporting operation. It does not require the simulation to proceed in the presence of an insecure credential. The approved policy is therefore to abort during preflight for any insecure or malformed token.
+
+The token file is validated once during `preflight_check()`, and only its path (not its content) is retained in `SASQUATCH_TOKEN_FILE_VALIDATED` for later re-reading by `report_to_sasquatch()` at the end of the script. In principle, the file at that path could be replaced between validation and use, and the replacement would not be subject to the ownership/mode/ACL/content checks performed at preflight time. This gap is accepted rather than closed by revalidating on every use, because exploiting it requires write access to `~/.lsst` (or its parent), which is assumed to be private to the effective user on S3DF (not group- or world-writable) — the same standard assumption already relied upon for `~/.lsst/usdf_access_token`. Under that assumption, an actor capable of replacing the file already has the same privilege as the job owner, at which point revalidating immediately before use would not meaningfully narrow the exposure. This design does not add a preflight check on the permissions of `~/.lsst` itself or its parent directories; if that assumption is ever in doubt for a given deployment, such a check (and/or revalidation immediately before use) should be added as a follow-up.
 
 ```bash
 local SASQUATCH_TOKEN_FILE="${HOME}/.lsst/sasquatch_access_token"
@@ -435,7 +442,7 @@ The JSON value object sent to Sasquatch:
 | `timestamp` | integer | Field/time | Always | Event time as Unix milliseconds, generated immediately before reporting |
 | `success` | boolean | Field | Always | `true` or `false` |
 | `uuid` | string | Field | On success | UUID of the nominal simulation |
-| `download_url` | string | Field | On success | URL to download the visits file for the nominal simulation |
+| `download_url` | string | Field | On success | URL to download the visits file for the nominal simulation. This is a public, non-signed URL with no embedded credential; it requires no confidentiality protection and may appear in logs, xtrace output, or Sasquatch/Chronograf query results. |
 | `total_visit_count` | integer | Field | On success | Total visits across all simulated nights |
 
 Tags requiring a Sasquatch configuration PR: `telescope`, `dayobs`. (The `simulation_type` tag from Angelo's example is not needed here since we report only the overall run status, not per-simulation-variant records.)
@@ -547,6 +554,10 @@ The `report_to_sasquatch` function body is identical in both scripts (as specifi
 
 None identified. The implementation matches §6 exactly.
 
+**Security review clarification (2026-09-01):** During review it was confirmed that `download_url` (as returned by `vseqarchive get-visitseq-url`) is a public, non-signed URL carrying no embedded credential. It therefore requires no confidentiality protection and is not subject to the same handling constraints as the Sasquatch bearer token (which remains the only value in this design that must never appear in a shell variable, curl argv, xtrace output, or logs). Context (§4), the `report_to_sasquatch` implementation comment (§6.2), and the schema table (§6.7) have been updated accordingly. No code changes were required as a result of this clarification.
+
+**Security fix (2026-09-01):** `report_to_sasquatch()` previously attached the `Authorization: Bearer` header whenever a validated token file was present (`[ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]`), independent of `SASQUATCH_REQUIRE_AUTH`. This meant a token would be sent even to the unauthenticated development endpoint if the file happened to exist. The condition was changed to `[ "${SASQUATCH_REQUIRE_AUTH}" = "true" ] && [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]` in both scripts and in §6.2, so the token is only ever transmitted when the endpoint's auth policy requires it. Preflight token validation (§6.4) is unchanged and still runs whenever the file is present, regardless of `SASQUATCH_REQUIRE_AUTH`, as defense-in-depth against an insecure token file being left in place.
+
 ---
 
 ## 8. Open Questions
@@ -590,6 +601,9 @@ None identified. The implementation matches §6 exactly.
 | 2026-08-27 | Eric Neilsen | Frame phase: added script-structure constraints to Context from codebase, Sasquatch repo, and rubin_sim sim_archive exploration |
 | 2026-08-27 | Eric Neilsen | Design phase: Architecture and Design (§6) drafted |
 | 2026-08-28 | Eric Neilsen | Security review amendments: endpoint-specific auth policy, strict token ownership/mode/ACL/content validation without storing token content in shell variables, explicit event timestamps, and corrected exit-trap boundary. |
+| 2026-09-01 | Eric Neilsen | Clarified that `download_url` is a public, non-signed URL requiring no confidentiality protection, distinct from the Sasquatch bearer token; updated §4, §6.2, §6.7, and §7.5 accordingly. |
+| 2026-09-01 | Eric Neilsen | Security fix: gated `Authorization` header transmission on `SASQUATCH_REQUIRE_AUTH=true` (in addition to token-file validity), so a present-but-unneeded token is never sent to the unauthenticated development endpoint; updated §6.2, §6.4, and §7.5 and both scripts. |
+| 2026-09-01 | Eric Neilsen | Documented the preflight-to-use gap for the Sasquatch token file as an accepted risk in §6.4, contingent on `~/.lsst` being private to the effective user; no code change made. |
 
 ---
 
