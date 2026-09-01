@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|--------|
 | **Issue** | LSST-3 |
-| **Branch** | `feature/LSST-3-sasquatch-reporting` |
+| **Branch** | `tickets/LSST-3` |
 | **Author** | Eric Neilsen |
 | **Status** | Drafting |
 | **Scope Tier** | T2 |
 | **QA Level** | Low |
 | **Estimate** | 2 days |
-| **Created / Updated** | 2026-08-27 / 2026-08-27 |
+| **Created / Updated** | 2026-08-27 / 2026-09-01 |
 
 ---
 
