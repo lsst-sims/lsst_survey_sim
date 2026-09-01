@@ -756,7 +756,7 @@ NOMINAL_VISIT_COUNT=""
 NOMINAL_DOWNLOAD_URL=""
 if [ -n "${NOMINAL_SIM_UUID}" ]; then
     NOMINAL_VISIT_COUNT=$(vseqarchive query-nightly-stats "${NOMINAL_SIM_UUID}" \
-        | awk -F'\t' 'NR>1 && !seen[$1]++ {sum += $3} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
+        | awk -F'\t' 'NR>1 && !seen[$2]++ {sum += $5} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
     NOMINAL_DOWNLOAD_URL=$(vseqarchive get-visitseq-url "${NOMINAL_SIM_UUID}") || NOMINAL_DOWNLOAD_URL=""
 fi
 
