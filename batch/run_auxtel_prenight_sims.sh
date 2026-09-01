@@ -238,7 +238,7 @@ grant_group_access() {
     local PATH_ITEM SCHEDULER_GROUP_USER
     for PATH_ITEM in "$@"; do
         for SCHEDULER_GROUP_USER in ${SCHEDULER_GROUP_USERS}; do
-            setfacl -m "${SCHEDULER_GROUP_USER}:rwX" "${PATH_ITEM}"
+            setfacl -m "u:${SCHEDULER_GROUP_USER}:rwX" "${PATH_ITEM}"
         done
     done
 }
