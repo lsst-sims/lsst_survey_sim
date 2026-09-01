@@ -291,11 +291,13 @@ report_to_sasquatch() {
     log "Reporting to Sasquatch: success=${SUCCESS} visits=${TOTAL_VISIT_COUNT:-n/a} uuid=${NOMINAL_SIM_UUID:-n/a}"
 
     # Construct a private curl config via process substitution so that
-    # neither the token nor the payload (which may contain a presigned
-    # download URL) appears in curl's argv or xtrace output.
+    # the Sasquatch bearer token never appears in curl's argv or in
+    # xtrace output. (The payload itself, including any download_url,
+    # is not a secret -- vseqarchive get-visitseq-url returns a public,
+    # non-signed URL -- so only the token needs this protection.)
     local CURL_OK=false
     local USE_TOKEN=false
-    if [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]; then
+    if [ "${SASQUATCH_REQUIRE_AUTH}" = "true" ] && [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]; then
         USE_TOKEN=true
     fi
 
