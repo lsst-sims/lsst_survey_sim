@@ -476,19 +476,19 @@ Tags requiring a Sasquatch configuration PR: `telescope`, `dayobs`. (The `simula
 
 ### 7.1 Design Conformance (Code Inspection)
 
-All 9 steps of the implementation outline (§6.9) are verified present in the branch `tickets/LSST-3` (commit `30b2697`):
+All 9 steps of the implementation outline (§6.9) are verified present in the branch `tickets/LSST-3` (commit `42b5a48`):
 
 | §6.9 Step | `run_prenight_sims.sh` | `run_auxtel_prenight_sims.sh` | Status |
 |---|---|---|---|
 | 1. Sasquatch constants | Lines 87–91 | Lines 84–88 | ✅ |
-| 2. `report_to_sasquatch()` function | Lines 313–393 | Lines 254–334 | ✅ |
-| 3. Preflight token validation | Lines 225–284 | Lines 176–235 | ✅ |
-| 4. Init `NOMINAL_SIM_UUID=""` | Line 671 | N/A (outer `SIM_UUID`) | ✅ |
-| 5. `LAST_SIM_UUID="${SIM_UUID}"` in function | Line 472 | N/A | ✅ |
-| 6. Capture UUID after 2nd nominal sim | Line 692 | N/A | ✅ |
-| 7. Compute visit count & download URL | Lines 761–767 | Lines 548–553 | ✅ |
-| 8. Success report before `.done` | Line 769 (`.done` at 775) | Line 556 (`.done` at 562) | ✅ |
-| 9. Failure report in `on_exit` trap | Line 479 | Line 340 | ✅ |
+| 2. `report_to_sasquatch()` function | Lines 312–387 | Lines 253–328 | ✅ |
+| 3. Preflight token validation | Lines 224–277 | Lines 175–228 | ✅ |
+| 4. Init `NOMINAL_SIM_UUID=""` | Line 665 | N/A (outer `SIM_UUID`) | ✅ |
+| 5. `LAST_SIM_UUID="${SIM_UUID}"` in function | Line 466 | N/A | ✅ |
+| 6. Capture UUID after 2nd nominal sim | Line 686 | N/A | ✅ |
+| 7. Compute visit count & download URL | Lines 755–760 | Lines 542–547 | ✅ |
+| 8. Success report before `.done` | Line 763 (`.done` at 769) | Line 550 (`.done` at 556) | ✅ |
+| 9. Failure report in `on_exit` trap | Line 473 | Line 334 | ✅ |
 
 The `report_to_sasquatch` function body is identical in both scripts (as specified in §6.2).
 
