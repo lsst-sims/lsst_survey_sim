@@ -350,12 +350,12 @@ NOMINAL_VISIT_COUNT=""
 NOMINAL_DOWNLOAD_URL=""
 if [ -n "${NOMINAL_SIM_UUID}" ]; then
     NOMINAL_VISIT_COUNT=$(vseqarchive query-nightly-stats "${NOMINAL_SIM_UUID}" \
-        | awk -F'\t' 'NR>1 && !seen[$1]++ {sum += $3} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
+        | awk -F'\t' 'NR>1 && !seen[$2]++ {sum += $5} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
     NOMINAL_DOWNLOAD_URL=$(vseqarchive get-visitseq-url "${NOMINAL_SIM_UUID}") || NOMINAL_DOWNLOAD_URL=""
 fi
 ```
 
-Explanation: The TSV output has one row per (day_obs, value_name). Since `add-nightly-stats` was called with columns `azimuth altitude`, there are two rows per night. We take only the first unseen `day_obs` row (via `!seen[$1]++`) to avoid double-counting, sum the `count` column (`$3`), and print the total. The download URL is the S3/HTTP URL for the visits file, as stored in the archive metadata.
+Explanation: The TSV output has one row per (day_obs, value_name). Since `add-nightly-stats` was called with columns `azimuth altitude`, there are two rows per night. We take only the first unseen `day_obs` row (via `!seen[$2]++`) to avoid double-counting, sum the `count` column (`$5`), and print the total. The download URL is the S3/HTTP URL for the visits file, as stored in the archive metadata.
 
 **6.5.4 Success reporting (end of script, before `.done`).**
 
@@ -401,7 +401,7 @@ After the existing `vseqarchive add-nightly-stats` call:
 
 ```bash
 NOMINAL_VISIT_COUNT=$(vseqarchive query-nightly-stats "${SIM_UUID}" \
-    | awk -F'\t' 'NR>1 && !seen[$1]++ {sum += $3} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
+    | awk -F'\t' 'NR>1 && !seen[$2]++ {sum += $5} END {print sum+0}') || NOMINAL_VISIT_COUNT=""
 NOMINAL_DOWNLOAD_URL=$(vseqarchive get-visitseq-url "${SIM_UUID}") || NOMINAL_DOWNLOAD_URL=""
 ```
 
