@@ -5,11 +5,11 @@
 | **Issue** | LSST-3 |
 | **Branch** | `tickets/LSST-3` |
 | **Author** | Eric Neilsen |
-| **Status** | Drafting |
+| **Status** | Verified |
 | **Scope Tier** | T2 |
 | **QA Level** | Low |
 | **Estimate** | 2 days |
-| **Created / Updated** | 2026-08-27 / 2026-09-01 |
+| **Created / Updated** | 2026-08-27 / 2026-09-08 |
 
 ---
 
@@ -496,14 +496,16 @@ The `report_to_sasquatch` function body is identical in both scripts (as specifi
 
 | Req | Criterion | Verification Method | Evidence / Instructions |
 |---|---|---|---|
-| R-1 | Simonyi success record sent to Sasquatch | Manual test | Run `run_prenight_sims.sh` to completion. Verify in Chronograf at `usdf-rsp-dev.slac.stanford.edu/chronograf` that a record appears in measurement `lsst.survey.pre_night` with `telescope=simonyi`, `dayobs` matching the simulated DAYOBS, `success=true`, and `timestamp` as an integer (Unix ms). |
-| R-2 | AuxTel success record sent to Sasquatch | Manual test | Run `run_auxtel_prenight_sims.sh` to completion. Verify in Chronograf that a record appears with `telescope=auxtel`, correct DAYOBS, `success=true`, and an integer `timestamp`. |
-| R-3 | Failure record sent on non-zero exit | Manual test | Inject a failure after trap installation (e.g., set `SCHED_CONFIG_FNAME` to a non-existent path, or `exit 1` after `preflight_check`). Verify in Chronograf that a record appears with `success=false` and an integer `timestamp`. Separately, verify that a failure *before* trap installation (e.g., missing gate file) does NOT produce a Sasquatch record. |
-| R-4 | Nominal statistics included on success | Manual test | On the success record from R-1 or R-2, verify: `total_visit_count` is a positive integer consistent with a 3-night simulation (~900–1500 visits for simonyi, fewer for auxtel), `uuid` is a valid UUID (8-4-4-4-12 hex), and `download_url` is a non-empty S3/HTTP URL. |
-| R-5 | Reporting failure does not alter script exit | Manual test | Temporarily set `SASQUATCH_URL` to an unreachable host (e.g., `https://unreachable.example.com/topics/lsst.survey`), keeping it equal to `SASQUATCH_DEV_URL` for the auth check. Run the script. Verify: (a) the script completes with exit 0, (b) `.done` marker is created, (c) a WARNING about Sasquatch reporting failure appears in the log. |
+| R-1 | Simonyi success record sent to Sasquatch | Manual test | ✅ **PASSED 2026-09-03.** `run_prenight_sims.sh` ran to completion; record confirmed in Chronograf at `usdf-rsp-dev.slac.stanford.edu/chronograf` with `telescope=simonyi`, correct DAYOBS, `success=true`, and integer `timestamp`. |
+| R-2 | AuxTel success record sent to Sasquatch | Manual test | ✅ **PASSED 2026-09-01.** `run_auxtel_prenight_sims.sh` ran to completion; record confirmed in Chronograf with `telescope=auxtel`, correct DAYOBS, `success=true`, and integer `timestamp`. |
+| R-3 | Failure record sent on non-zero exit | Manual test | ✅ **PASSED 2026-09-02.** Failure injected after trap installation; record with `success=false` and integer `timestamp` confirmed in Chronograf. Pre-trap failure (missing gate file) confirmed to produce no Sasquatch record. |
+| R-4 | Nominal statistics included on success | Manual test | ✅ **PASSED 2026-09-03.** Success record from R-1/R-2 confirmed: `total_visit_count` is a positive integer consistent with a 3-night simulation, `uuid` is in valid 8-4-4-4-12 hex format, `download_url` is a non-empty `https://` URL. |
+| R-5 | Reporting failure does not alter script exit | Manual test | ✅ **PASSED 2026-09-08.** Both `SASQUATCH_URL` and `SASQUATCH_DEV_URL` set to `https://unreachable.example.invalid/topics/lsst.survey`; script completed exit 0, `.done` created, and `WARNING: Sasquatch reporting failed. Continuing.` appeared in the log. |
 | R-6 | No new binary dependencies | Code inspection | The function uses only `curl`, `jq`, `awk`, `date`, `printf`, `tr`, `stat`, `getfacl`, and `vseqarchive` — all already available in the script environment. `stat` and `getfacl` were already used by the simonyi script's `check_dir_ready` and are now also checked in the auxtel script's `require_commands`. ✅ |
 
 ### 7.3 Manual Verification Procedure
+
+**Completed 2026-09-08 by Eric Neilsen. All steps passed. See §7.2 for recorded results.**
 
 **Prerequisites:**
 - Access to S3DF with SLURM job submission.
@@ -538,7 +540,7 @@ The `report_to_sasquatch` function body is identical in both scripts (as specifi
 
 **Steps for R-5 (reporting failure isolation):**
 
-1. Temporarily change both `SASQUATCH_URL` and `SASQUATCH_DEV_URL` to `https://unreachable.example.com/topics/lsst.survey`.
+1. Temporarily change both `SASQUATCH_URL` and `SASQUATCH_DEV_URL` to `https://unreachable.example.invalid/topics/lsst.survey`.
 2. Run the script to completion.
 3. Verify: exit status is 0, `.done` is created, and the log contains `WARNING: Sasquatch reporting failed. Continuing.`
 
@@ -604,6 +606,7 @@ None identified. The implementation matches §6 exactly.
 | 2026-09-01 | Eric Neilsen | Clarified that `download_url` is a public, non-signed URL requiring no confidentiality protection, distinct from the Sasquatch bearer token; updated §4, §6.2, §6.7, and §7.5 accordingly. |
 | 2026-09-01 | Eric Neilsen | Security fix: gated `Authorization` header transmission on `SASQUATCH_REQUIRE_AUTH=true` (in addition to token-file validity), so a present-but-unneeded token is never sent to the unauthenticated development endpoint; updated §6.2, §6.4, and §7.5 and both scripts. |
 | 2026-09-01 | Eric Neilsen | Documented the preflight-to-use gap for the Sasquatch token file as an accepted risk in §6.4, contingent on `~/.lsst` being private to the effective user; no code change made. |
+| 2026-09-08 | Eric Neilsen | Manual verification procedure (§7.3) completed; all requirements R-1–R-6 passed. Status updated to Verified. |
 
 ---
 
@@ -622,7 +625,7 @@ None identified. The implementation matches §6 exactly.
 
 - [ ] Scope (§1.1) respected — nothing implemented from the out-of-scope list.
 - [ ] Architecture and Design (§6) approved; for T2 before implementation, for T1 before merge.
-- [ ] Every External Requirement (§3.1) has a passing test or a recorded manual check (§6, §7).
+- [x] Every External Requirement (§3.1) has a passing test or a recorded manual check (§6, §7).
 - [ ] Material deviations from Architecture and Design (§6) are approved and recorded.
 - [ ] A targeted diff review was completed; detailed review was performed for applicable risk triggers.
 - [ ] Durable content has been promoted to project documentation where useful and logged in the Change Log (§10).
