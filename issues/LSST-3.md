@@ -560,6 +560,8 @@ None identified. The implementation matches §6 exactly.
 
 **Security fix (2026-09-01):** `report_to_sasquatch()` previously attached the `Authorization: Bearer` header whenever a validated token file was present (`[ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]`), independent of `SASQUATCH_REQUIRE_AUTH`. This meant a token would be sent even to the unauthenticated development endpoint if the file happened to exist. The condition was changed to `[ "${SASQUATCH_REQUIRE_AUTH}" = "true" ] && [ -n "${SASQUATCH_TOKEN_FILE_VALIDATED:-}" ]` in both scripts and in §6.2, so the token is only ever transmitted when the endpoint's auth policy requires it. Preflight token validation (§6.4) is unchanged and still runs whenever the file is present, regardless of `SASQUATCH_REQUIRE_AUTH`, as defense-in-depth against an insecure token file being left in place.
 
+**Targeted diff review (2026-09-08):** Detailed review completed covering scope compliance, design conformance, security (bearer-token handling), failure isolation, `set -euo pipefail` interaction, variable scoping, and documentation updates. No code defects found. One minor documentation inconsistency noted: the Context section (§4) lists `query-nightly-stats` TSV columns as `day_obs, value_name, count, mean, std, ...` (implying `$1`=day_obs, `$3`=count), but the code correctly uses `$2` for day_obs dedup and `$5` for count — the actual TSV likely has a leading column not listed in Context. The code is confirmed correct by manual verification (R-4 passed 2026-09-03). The auxtel `setfacl` fix (`u:` prefix) is a drive-by correction of a pre-existing ambiguity, noted in Implementation Notes.
+
 ---
 
 ## 8. Open Questions
@@ -607,6 +609,10 @@ None identified. The implementation matches §6 exactly.
 | 2026-09-01 | Eric Neilsen | Security fix: gated `Authorization` header transmission on `SASQUATCH_REQUIRE_AUTH=true` (in addition to token-file validity), so a present-but-unneeded token is never sent to the unauthenticated development endpoint; updated §6.2, §6.4, and §7.5 and both scripts. |
 | 2026-09-01 | Eric Neilsen | Documented the preflight-to-use gap for the Sasquatch token file as an accepted risk in §6.4, contingent on `~/.lsst` being private to the effective user; no code change made. |
 | 2026-09-08 | Eric Neilsen | Manual verification procedure (§7.3) completed; all requirements R-1–R-6 passed. Status updated to Verified. |
+| 2026-09-08 | Eric Neilsen | Implementation Notes (§impl) filled in at closeout. |
+| 2026-09-08 | Eric Neilsen | Promoted to `batch/design.md`: Sasquatch Status Reporting section (endpoint, payload schema, authentication, failure isolation, reporting boundary, Chronograf URL); added Sasquatch constants to Key Constants table; added `sasquatch_access_token` to new Credential Files subsection; added Sasquatch to External Services; added Sasquatch diagnostics to Diagnosing Failures; updated Data Flow and Error Handling. |
+| 2026-09-08 | Eric Neilsen | Promoted to `batch/README.txt`: Sasquatch token prerequisite; Sasquatch Monitoring section; updated script descriptions to mention status reporting. |
+| 2026-09-08 | Eric Neilsen | Targeted diff review completed (detailed for security risk trigger). No code defects; one minor Context §4 column-list inconsistency noted. Definition of Done updated. |
 
 ---
 
@@ -643,10 +649,10 @@ None identified. The implementation matches §6 exactly.
 
 ## Definition of Done
 
-- [ ] Scope (§1.1) respected — nothing implemented from the out-of-scope list.
-- [ ] Architecture and Design (§6) approved; for T2 before implementation, for T1 before merge.
+- [x] Scope (§1.1) respected — nothing implemented from the out-of-scope list.
+- [x] Architecture and Design (§6) approved; for T2 before implementation, for T1 before merge.
 - [x] Every External Requirement (§3.1) has a passing test or a recorded manual check (§6, §7).
-- [ ] Material deviations from Architecture and Design (§6) are approved and recorded.
-- [ ] A targeted diff review was completed; detailed review was performed for applicable risk triggers.
-- [ ] Durable content has been promoted to project documentation where useful and logged in the Change Log (§10).
+- [x] Material deviations from Architecture and Design (§6) are approved and recorded.
+- [x] A targeted diff review was completed; detailed review was performed for applicable risk triggers.
+- [x] Durable content has been promoted to project documentation where useful and logged in the Change Log (§10).
 - [ ] CI is green; the change has been reviewed per the review discipline (process §4.1).
