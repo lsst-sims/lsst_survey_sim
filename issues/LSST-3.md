@@ -612,14 +612,34 @@ None identified. The implementation matches §6 exactly.
 
 ## Implementation Notes
 
-*(To be provided by the implementation agent at closeout.)*
+- **Design steps completed:** All 9 steps of §6.9 implemented across 10 commits on `tickets/LSST-3`. See §7.1 for the step-by-step line-number mapping.
 
-- Design steps completed:
-- Files and symbols changed:
-- Tests added or updated and results:
-- Outcome evidence:
-- Approved design amendments:
-- Unresolved deviations:
+- **Files and symbols changed:**
+  - `batch/run_prenight_sims.sh` (+169 lines):
+    - Added constants: `SASQUATCH_URL`, `SASQUATCH_DEV_URL`, `SASQUATCH_REQUIRE_AUTH`, `TELESCOPE`, `SASQUATCH_TOKEN_FILE_VALIDATED`.
+    - Added `report_to_sasquatch()` helper function.
+    - Extended `preflight_check()` with Sasquatch endpoint/auth-policy enforcement and secure token-file validation (symlink rejection, ownership, mode, ACL, content checks with xtrace suppression).
+    - Added `stat` and `getfacl` to `require_commands` (replacing `tar`, which was not actually used by the new code but was already present).
+    - Added `LAST_SIM_UUID="${SIM_UUID}"` at end of `run_and_archive_sim()` to export the UUID to the caller.
+    - Added `NOMINAL_SIM_UUID=""` initialization and capture after the second nominal sim call.
+    - Added Sasquatch reporting section: computes `NOMINAL_VISIT_COUNT` and `NOMINAL_DOWNLOAD_URL` via `vseqarchive query-nightly-stats` and `vseqarchive get-visitseq-url`, then calls `report_to_sasquatch "true" ... || true`.
+    - Modified `on_exit()` to call `report_to_sasquatch "false" ... || true` on non-zero exit status.
+  - `batch/run_auxtel_prenight_sims.sh` (+165 lines):
+    - Same constants (with `TELESCOPE="auxtel"`), same `report_to_sasquatch()` function body, same preflight token validation block.
+    - Added `stat` and `getfacl` to `require_commands`.
+    - Fixed `setfacl` calls in `grant_group_access()` to use unambiguous `u:` prefix (`setfacl -m "u:${USER}:rwX"` instead of `setfacl -m "${USER}:rwX"`).
+    - Added Sasquatch reporting section using outer-scope `SIM_UUID` directly (no `LAST_SIM_UUID` mechanism needed).
+    - Modified `on_exit()` with the same failure-reporting pattern.
+
+- **Tests added or updated and results:** No automated tests — these are standalone SLURM batch scripts with no test harness. All six requirements verified by manual testing on S3DF against the `usdf-rsp-dev` Sasquatch instance. Results recorded in §7.2 with dates (R-1 passed 2026-09-03, R-2 passed 2026-09-01, R-3 passed 2026-09-02, R-4 passed 2026-09-03, R-5 passed 2026-09-08, R-6 by code inspection).
+
+- **Outcome evidence:** Records confirmed present in Chronograf at `usdf-rsp-dev.slac.stanford.edu/chronograf` under measurement `lsst.survey.pre_night` for both `telescope=simonyi` and `telescope=auxtel`, with correct DAYOBS, success/failure flags, integer timestamps, visit counts, UUIDs, and download URLs.
+
+- **Approved design amendments:** None. Two security clarifications were made to the design document during implementation (both 2026-09-01) and are recorded in §7.5:
+  1. Clarified that `download_url` is a public, non-signed URL requiring no confidentiality protection — no code change.
+  2. Gated `Authorization` header transmission on `SASQUATCH_REQUIRE_AUTH=true` in addition to token-file validity — code change in both scripts.
+
+- **Unresolved deviations:** None identified. Implementation matches §6 exactly (§7.5).
 
 ## Definition of Done
 
