@@ -10,12 +10,14 @@ simulations at the USDF (SLAC S3DF) and manage the disk space they consume.
 Runs Simonyi (main telescope) prenight simulations.  Produces multiple
 simulations per night with varying conditions (nominal, delayed start,
 anomalous overhead, good/poor seeing), archives results to S3 and the
-visit-sequence metadata database, and updates the prenight index.
+visit-sequence metadata database, updates the prenight index, and reports
+completion status to Sasquatch for monitoring.
 
 ### run_auxtel_prenight_sims.sh
 
 Runs AuxTel (auxiliary telescope) prenight simulations.  Produces a single
-nominal simulation, archives results, and updates the prenight index.
+nominal simulation, archives results, updates the prenight index, and reports
+completion status to Sasquatch for monitoring.
 
 ### cleanup_prenight.sh
 
@@ -53,6 +55,8 @@ If DAYOBS is not set, the scripts default to the current observing day
 - AWS profile `prenight` configured for S3 archive access
 - Gate file present (see "Cron Gate Mechanism" below)
 - Conda available via `/sdf/group/rubin/sw/w_latest/loadLSST.sh`
+- (Production only) Sasquatch token at `~/.lsst/sasquatch_access_token`
+  with `write:sasquatch` scope (mode 400 or 600, no symlinks, no named ACLs)
 
 ## Cron Gate Mechanism
 
@@ -65,6 +69,18 @@ scheduler group member to stop another member's cron job by deleting their
 gate file, without needing access to their crontab.  See:
 
     /sdf/data/rubin/shared/scheduler/cron_gates/README.txt
+
+## Sasquatch Monitoring
+
+Both simulation scripts report success/failure status, visit counts, and
+simulation UUIDs to Sasquatch (`lsst.survey.pre_night` measurement) after
+each run.  This allows downstream monitoring to detect missing or failed
+simulations.  If Sasquatch is unreachable, a warning is logged but the
+script's exit status is unaffected.
+
+Records can be viewed in Chronograf at
+`https://usdf-rsp-dev.slac.stanford.edu/chronograf`.  See `batch/design.md`
+for payload details and authentication configuration.
 
 ## Key Paths
 

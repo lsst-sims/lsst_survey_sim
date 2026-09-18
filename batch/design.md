@@ -29,6 +29,7 @@ are typically triggered by cron.
 5. Record metadata and statistics in the PostgreSQL metadata database
 6. Update the prenight index so downstream consumers (schedview, Times Square)
    can discover the new simulations
+7. Report completion status and basic statistics to Sasquatch for monitoring
 
 ---
 
@@ -67,6 +68,9 @@ multiplier, and whether detailed reward data is recorded.
 - An `EXIT` trap logs the final status
 - The prenight index is updated after each successful simulation so partial
   results are visible even if later simulations fail
+- On completion (success or failure), the script reports its status to
+  Sasquatch; reporting failures are logged but never alter the script's exit
+  status
 
 ---
 
@@ -182,6 +186,55 @@ Each run creates a dedicated conda environment on scratch and installs
 is hashed and recorded in the metadata database (`conda_env_sha256`), enabling
 exact reproduction of any past simulation.
 
+### Sasquatch Status Reporting
+
+Both simulation scripts report their completion status to
+[Sasquatch](https://sasquatch.lsst.io), the project's timeseries database, so
+that downstream monitoring can detect when simulations fail or do not run.
+
+**Endpoint and namespace.**  Records are POSTed to the Sasquatch REST Proxy at
+`https://<host>/sasquatch-rest-proxy/topics/lsst.survey` using content type
+`application/vnd.kafka.json.v2+json`.  The measurement name is
+`lsst.survey.pre_night`.  The current deployment targets the `usdf-rsp-dev`
+instance; production cutover requires changing the URL and enabling
+authentication.
+
+**Payload.**  Each record contains:
+
+| Field | Type | Present | Description |
+|-------|------|---------|-------------|
+| `measurement` | string | Always | `"lsst.survey.pre_night"` |
+| `telescope` | string | Always | `"simonyi"` or `"auxtel"` |
+| `dayobs` | string | Always | `YYYYMMDD` or `"unknown"` on early failure |
+| `timestamp` | integer | Always | Event time as Unix milliseconds |
+| `success` | boolean | Always | `true` or `false` |
+| `uuid` | string | On success | UUID of the nominal simulation |
+| `total_visit_count` | integer | On success | Total visits across all simulated nights |
+| `download_url` | string | On success | Public URL for the visits file |
+
+**Authentication.**  When `SASQUATCH_REQUIRE_AUTH=true`, the script reads a
+bearer token from `~/.lsst/sasquatch_access_token` (requires `write:sasquatch`
+scope).  The token is never stored in a shell variable or passed in curl's
+argv; it is fed through a process-substitution curl config file with xtrace
+disabled.  Preflight validates the token file (ownership, mode 400/600, no
+symlinks, no named POSIX ACL entries, single-line bounded-length content)
+whenever the file exists, regardless of the auth-required setting.
+Unauthenticated reporting is permitted only when `SASQUATCH_URL` equals the
+explicitly allow-listed development endpoint.
+
+**Failure isolation.**  All calls to `report_to_sasquatch` are guarded with
+`|| true`.  If Sasquatch is unreachable, the script logs a warning and
+continues; the simulation results remain the primary deliverable.
+
+**Reporting boundary.**  Success is reported just before the `.done` marker.
+Failure is reported in the `on_exit` trap when `$? != 0`.  Failures before
+trap installation (gate rejection, group-switch failure, invalid DAYOBS) are
+not reported to Sasquatch.
+
+**Viewing results.**  Records can be queried in Chronograf at
+`https://usdf-rsp-dev.slac.stanford.edu/chronograf` under the
+`lsst.survey.pre_night` measurement.
+
 ### Completion Markers
 
 Simulation scripts touch a `.done` file in the work directory upon successful
@@ -200,6 +253,10 @@ marker, ensuring in-progress or failed runs are never cleaned up automatically.
 | `TS_CONFIG_SCHEDULER_REFERENCE` | sim scripts | Git branch/ref for scheduler config (default: `develop`) |
 | `SIM_NIGHTS` | sim scripts | Number of nights to simulate (default: 3) |
 | `SCHEDULER_GROUP_USERS` | all | Users granted ACL access |
+| `SASQUATCH_URL` | sim scripts | Sasquatch REST Proxy endpoint for status reporting |
+| `SASQUATCH_DEV_URL` | sim scripts | Allow-listed dev endpoint (unauthenticated reporting permitted only when URL matches this) |
+| `SASQUATCH_REQUIRE_AUTH` | sim scripts | `true` to require bearer-token authentication; `false` only for the dev endpoint |
+| `TELESCOPE` | sim scripts | Telescope identifier sent in the Sasquatch record (`simonyi` or `auxtel`) |
 | `MIN_WORK_FREE_KB` | cleanup | Free-space threshold for archive offload (10 GiB) |
 | `MIN_VENV_FREE_KB` | cleanup | Free-space threshold for venv archive cleanup (10 GiB) |
 
@@ -267,6 +324,11 @@ to re-enable.
 - Verify preflight conditions (disk space, ACLs, token validity)
 - Check that the work directory does not contain a `.done` file (indicates
   the job did not complete successfully)
+- Query Sasquatch/Chronograf for the `lsst.survey.pre_night` measurement to
+  see whether the script reported success, failure, or did not report at all
+  (indicating a pre-trap failure or Sasquatch unreachable)
+- Look for `WARNING: Sasquatch reporting failed` in the logs if reporting
+  appears to be missing
 
 ---
 
@@ -275,7 +337,7 @@ to re-enable.
 ### System Commands
 
 `date`, `id`, `sg`, `git`, `curl`, `jq`, `df`, `awk`, `tar`, `find`,
-`mktemp`, `mkdir`, `ln`, `rm`, `chmod`, `setfacl`, `getfacl`
+`mktemp`, `mkdir`, `ln`, `rm`, `chmod`, `setfacl`, `getfacl`, `stat`, `tr`
 
 ### Python Packages (installed at runtime)
 
@@ -285,9 +347,20 @@ to re-enable.
 - `rubin-scheduler`
 - `ts_fbs_utils`
 
+### Credential Files
+
+| File | Purpose | Required |
+|------|---------|----------|
+| `~/.lsst/usdf_access_token` | consdb / metadata database access | Always |
+| `~/.lsst/sasquatch_access_token` | Sasquatch bearer token (`write:sasquatch` scope) | Only when `SASQUATCH_REQUIRE_AUTH=true` (production) |
+
+Both files must be non-symlink regular files owned by the effective user with
+mode `400` or `600` and no named POSIX ACL entries.
+
 ### External Services
 
 - consdb (consolidated database) — visit history
 - PostgreSQL metadata database — simulation metadata and indices
 - S3 (`rubin-scheduler-prenight` bucket) — simulation artifact archive
+- Sasquatch / InfluxDB (`lsst.survey` namespace) — simulation status reporting
 - GitHub — `lsst_survey_sim` and `ts_config_scheduler` source
