@@ -9,6 +9,6 @@ numpy
 pandas
 psycopg2
 rubin-nights >=0.12.0
-rubin-scheduler =3.21.1
+rubin-scheduler =4.6.0
 rubin-sim >=2.6.1
 
