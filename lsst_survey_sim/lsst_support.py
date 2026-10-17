@@ -803,9 +803,9 @@ class SlewScatter:
 
     Parameters
     ----------
-    seed : `int`
+    seed
         Random number seed.
-    slew_scale : `float`
+    slew_scale
         The scale for the scatter in the slew offsets (seconds).
         The offset here is implemented as the absolute value of a
         normal distribution with mean 0 and stdev = slew_scale.
@@ -825,19 +825,17 @@ class SlewScatter:
         self.rng = np.random.default_rng(seed)
         self.slew_scale = slew_scale
 
-    def __call__(self, visittime: float, slewtime: float) -> float:
+    def __call__(self, obs=None) -> float:
         """Return a randomized offset for the visit overhead.
 
         Parameters
         ----------
-        visittime : `float`
-            The visit time (seconds).
-        slewtime : `float`
-            The slew time (seconds).
+        obs
+            The observation to be acquired.
 
         Returns
         -------
-        offset: `float`
+        offset : `float`
             Random offset (seconds).
         """
 
