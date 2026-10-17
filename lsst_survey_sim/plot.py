@@ -53,6 +53,7 @@ def make_plot(
     background: npt.NDArray | None = None,
     title: str | None = None,
     label_dec: bool = True,
+    cmap: str = None,
 ) -> Figure | SubFigure | None:
     """Nicer figure."""
     if ax is not None:
@@ -100,7 +101,13 @@ def make_plot(
         zoom = False
 
     mesh, lon_raster, lat_raster, values_raster = sp.draw_hpxmap(
-        metric_bundle.metric_values.filled(np.nan), vmin=vmin, vmax=vmax, nest=False, zoom=zoom, zorder=1.5
+        metric_bundle.metric_values.filled(np.nan),
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        nest=False,
+        zoom=zoom,
+        zorder=1.5,
     )
 
     if vmin is None and vmax is None:
