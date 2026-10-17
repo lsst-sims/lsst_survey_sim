@@ -163,7 +163,7 @@ def survey_footprint(
 
 def survey_times(
     downtime_start_day_obs: int,
-    new_downtime_ndays: float = 365.0 * 10.2,
+    new_downtime_ndays: float = 365.0 * 11.2,
     random_seed: int = 55,
     minutes_after_sunset12: float = 0,
     early_dome_closure: float = 0,
@@ -236,7 +236,7 @@ def survey_times(
     warnings.filterwarnings("ignore", category=ErfaWarning)
 
     # Time limits for simulating downtime in this function.
-    downtime_start = rn_dayobs.day_obs_to_time(downtime_start_day_obs)
+    downtime_start = rn_dayobs.day_obs_to_time(downtime_start_day_obs) - TimeDelta(1, format="jd")
     # Simulated downtime period,
     downtime_length = TimeDelta(new_downtime_ndays, format="jd")
     downtime_end = downtime_start + downtime_length
@@ -309,7 +309,7 @@ def survey_times(
         plan_down_starts: list[Time] = [
             Time("2026-03-04T12:00:00", scale="utc"),
             Time("2026-04-15T12:00:00", scale="utc"),
-            Time("2026-07-15T12:00:00", scale="utc"),  # major storm
+            # Time("2026-07-15T12:00:00", scale="utc"),  # major storm
             Time("2026-08-18T12:00:00", scale="utc"),  # ~ August shutdown
             Time("2027-06-10T12:00:00", scale="utc"),  # y2
             Time("2028-06-28T12:00:00", scale="utc"),  # y3
@@ -326,11 +326,11 @@ def survey_times(
         plan_down_ends: list[Time] = [
             Time("2026-03-05T12:00:00", scale="utc"),
             Time("2026-04-17T12:00:00", scale="utc"),
-            Time("2026-07-21T12:00:00", scale="utc"),  # major storm
+            # Time("2026-08-19T12:00:00", scale="utc"),  # major storm
             Time("2026-09-08T12:00:00", scale="utc"),  # ~ August shutdown
-            Time("2027-07-01T12:00:00", scale="utc"),
-            Time("2028-07-19T12:00:00", scale="utc"),
-            Time("2029-08-28T12:00:00", scale="utc"),
+            Time("2027-07-01T12:00:00", scale="utc"),  # y2
+            Time("2028-07-19T12:00:00", scale="utc"),  # y3
+            Time("2029-08-28T12:00:00", scale="utc"),  # y4 - 3 + 8 wk
             Time("2030-07-24T12:00:00", scale="utc"),
             Time("2031-08-14T12:00:00", scale="utc"),
             Time("2032-07-06T12:00:00", scale="utc"),
@@ -361,6 +361,13 @@ def survey_times(
         eng_nights = dates[dates.weekday.isin([1, 3])]
         eng_night_starts = Time(eng_nights).mjd
         eng_night_ends = Time(Time(eng_nights).mjd + 0.7, format="mjd").mjd
+        down_starts = np.concatenate([down_starts, eng_night_starts])
+        down_ends = np.concatenate([down_ends, eng_night_ends])
+        # But add some extra nights in case of weather
+        # (should reprogram in sims as a survey to handle rescheduling)
+        eng_nights = dates[dates.weekday.isin([4])]
+        eng_night_starts = Time(eng_nights).mjd
+        eng_night_ends = Time(Time(eng_nights).mjd + 0.6, format="mjd").mjd
         down_starts = np.concatenate([down_starts, eng_night_starts])
         down_ends = np.concatenate([down_ends, eng_night_ends])
 
