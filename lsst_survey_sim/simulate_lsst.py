@@ -454,8 +454,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         The configured band scheduler.
     """
     # Set up the filter scheduler.
-    # Might be reasonable to add kwargs for upcoming filter swaps,
-    # but it's also pretty easy to modify this file to match summit schedule.
+    # Follow summit schedule in confluence + `Filter swap` in jira. 
     # https://rubinobs.atlassian.net/wiki/spaces/CAM
     # #  /pages/702939386/Filter+Swap+planning (confluence).
     # See also slack, #cam-filter-exchange
@@ -474,9 +473,14 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-05-12": ["u", "g", "r", "i", "z"],
         "2026-05-26": ["g", "r", "i", "z", "y"],
         "2026-06-09": ["u", "g", "r", "i", "z"],
-        "2026-07-23": ["g", "r", "i", "z", "y"],
+        "2026-10-18": ["g", "r", "i", "z", "y"],
+        "2026-11-03": ["u", "g", "r", "i", "z"],
+        "2026-11-17": ["g", "r", "i", "z", "y"],
+        "2026-12-01": ["u", "g", "r", "i", "z"],
+        "2026-12-15": ["g", "r", "i", "z", "y"],
+        "2026-12-29": ["u", "g", "r", "i", "z"],
     }
-    end_date = Time("2026-07-30T12:00:00")
+    end_date = Time("2027-01-01T12:00:00")
     band_scheduler = DateSwapBandScheduler(
         swap_schedule=upcoming_schedule,
         end_date=end_date,
