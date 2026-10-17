@@ -454,7 +454,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         The configured band scheduler.
     """
     # Set up the filter scheduler.
-    # Follow summit schedule in confluence + `Filter swap` in jira. 
+    # Follow summit schedule in confluence + `Filter swap` in jira.
     # https://rubinobs.atlassian.net/wiki/spaces/CAM
     # #  /pages/702939386/Filter+Swap+planning (confluence).
     # See also slack, #cam-filter-exchange
