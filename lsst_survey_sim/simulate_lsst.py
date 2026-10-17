@@ -494,6 +494,7 @@ def setup_observatory(
     nside: int = DEFAULT_NSIDE,
     add_downtime: bool = False,
     add_clouds: bool = False,
+    cloud_offset_year: int = 0,
     seeing: float | None = None,
     real_downtime: bool = False,
     downtime_start_day_obs: int | None = None,
@@ -522,6 +523,10 @@ def setup_observatory(
         If False, will not add cloud downtime and use 'ideal' (no) clouds.
         For prenight simulations, this should be False.
         For full simulations, this should probably be True.
+    cloud_offset_year
+        If add_clouds is true, this will enable an offset from the
+        default year.
+        The 1997 El Nino year is an offset of 22.
     seeing
         Set the seeing to a single value (float) or use seeing distribution
         (if None).
@@ -600,7 +605,11 @@ def setup_observatory(
     if baseline_observatory:
         # Now that we have downtime, set up model observatory.
         observatory = lsst_support.setup_observatory_simulation(
-            survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
+            survey_info,
+            seeing=seeing,
+            add_clouds=add_clouds,
+            cloud_offset_year=cloud_offset_year,
+            too_server=too_server,
         )
         LOGGER.info("Set up baseline observatory.")
     else:
@@ -609,6 +618,7 @@ def setup_observatory(
             survey_info,
             seeing=seeing,
             add_clouds=add_clouds,
+            cloud_offset_year=cloud_offset_year,
             too_server=too_server,
             time_setup=rn_dayobs.day_obs_to_time(day_obs),
             efd_client=get_endpoints(tokenfile=tokenfile, site=site)["efd"],

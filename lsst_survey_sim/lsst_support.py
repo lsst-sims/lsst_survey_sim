@@ -607,6 +607,7 @@ def setup_observatory_summit(
     survey_info: dict,
     seeing: float | str | None = None,
     add_clouds: bool = False,
+    cloud_offset_year: int = 0,
     too_server: SimTargetooServer | None = None,
     time_setup: Time | None = None,
     expected_wait_settle: float = EXPECTED_WAIT_SETTLE,
@@ -629,6 +630,10 @@ def setup_observatory_summit(
     add_clouds
         If True, use our standard cloud downtime model.
         If False, use the 'ideal' cloud model resulting in no downtime.
+    cloud_offset_year
+        If add_clouds is true, this will enable an offset from the
+        default year.
+        The 1997 El Nino year is an offset of 22.
     too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
@@ -680,6 +685,7 @@ def setup_observatory_summit(
         mjd=survey_info["survey_start"].mjd,
         mjd_start=survey_info["survey_start"].mjd,
         cloud_data=cloud_data,
+        cloud_offset_year=cloud_offset_year,
         seeing_data=seeing_data,
         seeing_db=seeing_db,
         wind_data=None,
@@ -721,6 +727,7 @@ def setup_observatory_simulation(
     survey_info: dict,
     seeing: float | str | None = None,
     add_clouds: bool = False,
+    cloud_offset_year: int = 0,
     too_server: SimTargetooServer | None = None,
 ) -> ModelObservatory:
     """Configure a `summit-10` model observatory.
@@ -739,6 +746,10 @@ def setup_observatory_simulation(
     add_clouds
         If True, use our standard cloud downtime model.
         If False, use the 'ideal' cloud model resulting in no downtime.
+    cloud_offset_year
+        If add_clouds is true, this will enable an offset from the
+        default year.
+        The 1997 El Nino year is an offset of 22.
     too_server
         A `SimTargetooServer` wrapping a list of TargetoO
         (target of opportunity) events.
@@ -770,6 +781,7 @@ def setup_observatory_simulation(
         mjd=survey_info["survey_start"].mjd,
         mjd_start=survey_info["survey_start"].mjd,
         cloud_data=cloud_data,
+        cloud_offset_year=cloud_offset_year,
         seeing_data=seeing_data,
         seeing_db=seeing_db,
         wind_data=None,
