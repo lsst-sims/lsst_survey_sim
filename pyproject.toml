@@ -11,8 +11,8 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Astronomy",
  ]
 urls = {repository = "https://github.com/lsst-sims/lsst_survey_sim" }
@@ -29,10 +29,10 @@ dependencies = [
     "numpy",
     "pandas",
     "psycopg2-binary",
-    "rubin-nights >= 0.12.0",
-    "rubin-scheduler == 3.21.1",
-    "rubin-sim >= 2.6.1",
-    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.19.2",
+    "rubin-nights >= 0.18.2",
+    "rubin-scheduler == 4.6.0",
+    "rubin-sim >= 2.6.2",
+    "ts_fbs_utils@git+https://github.com/lsst-ts/ts_fbs_utils@v0.9.5",
 ]
 
 
@@ -71,7 +71,7 @@ ignore_missing_imports = "True"
 
 [tool.black]
 line-length = 110
-target-version = ["py313"]
+target-version = ["py314"]
 
 [tool.isort]
 profile = "black"
@@ -82,7 +82,7 @@ exclude = [
     "__init__.py", "notebooks",
 ]
 line-length = 110
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 ignore = [

@@ -454,8 +454,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         The configured band scheduler.
     """
     # Set up the filter scheduler.
-    # Might be reasonable to add kwargs for upcoming filter swaps,
-    # but it's also pretty easy to modify this file to match summit schedule.
+    # Follow summit schedule in confluence + `Filter swap` in jira.
     # https://rubinobs.atlassian.net/wiki/spaces/CAM
     # #  /pages/702939386/Filter+Swap+planning (confluence).
     # See also slack, #cam-filter-exchange
@@ -474,9 +473,14 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-05-12": ["u", "g", "r", "i", "z"],
         "2026-05-26": ["g", "r", "i", "z", "y"],
         "2026-06-09": ["u", "g", "r", "i", "z"],
-        "2026-07-23": ["g", "r", "i", "z", "y"],
+        "2026-10-18": ["g", "r", "i", "z", "y"],
+        "2026-11-03": ["u", "g", "r", "i", "z"],
+        "2026-11-17": ["g", "r", "i", "z", "y"],
+        "2026-12-01": ["u", "g", "r", "i", "z"],
+        "2026-12-15": ["g", "r", "i", "z", "y"],
+        "2026-12-29": ["u", "g", "r", "i", "z"],
     }
-    end_date = Time("2026-07-30T12:00:00")
+    end_date = Time("2027-01-01T12:00:00")
     band_scheduler = DateSwapBandScheduler(
         swap_schedule=upcoming_schedule,
         end_date=end_date,
@@ -490,6 +494,7 @@ def setup_observatory(
     nside: int = DEFAULT_NSIDE,
     add_downtime: bool = False,
     add_clouds: bool = False,
+    cloud_offset_year: int = 0,
     seeing: float | None = None,
     real_downtime: bool = False,
     downtime_start_day_obs: int | None = None,
@@ -518,6 +523,10 @@ def setup_observatory(
         If False, will not add cloud downtime and use 'ideal' (no) clouds.
         For prenight simulations, this should be False.
         For full simulations, this should probably be True.
+    cloud_offset_year
+        If add_clouds is true, this will enable an offset from the
+        default year.
+        The 1997 El Nino year is an offset of 22.
     seeing
         Set the seeing to a single value (float) or use seeing distribution
         (if None).
@@ -596,7 +605,11 @@ def setup_observatory(
     if baseline_observatory:
         # Now that we have downtime, set up model observatory.
         observatory = lsst_support.setup_observatory_simulation(
-            survey_info, seeing=seeing, add_clouds=add_clouds, too_server=too_server
+            survey_info,
+            seeing=seeing,
+            add_clouds=add_clouds,
+            cloud_offset_year=cloud_offset_year,
+            too_server=too_server,
         )
         LOGGER.info("Set up baseline observatory.")
     else:
@@ -605,6 +618,7 @@ def setup_observatory(
             survey_info,
             seeing=seeing,
             add_clouds=add_clouds,
+            cloud_offset_year=cloud_offset_year,
             too_server=too_server,
             time_setup=rn_dayobs.day_obs_to_time(day_obs),
             efd_client=get_endpoints(tokenfile=tokenfile, site=site)["efd"],
