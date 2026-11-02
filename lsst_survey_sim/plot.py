@@ -53,7 +53,7 @@ def make_plot(
     background: npt.NDArray | None = None,
     title: str | None = None,
     label_dec: bool = True,
-    cmap: str = None,
+    cmap: str = 'viridis',
 ) -> Figure | SubFigure | None:
     """Nicer figure."""
     if ax is not None:
