@@ -528,7 +528,7 @@ source /sdf/group/rubin/sw/w_latest/loadLSST.sh
 set -u
 
 PRENIGHT_VENV=$(mktemp -d "${PRENIGHT_VENV_ROOT}/prenight-${WORK_DATE}-XXXXXX")
-conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13 --quiet
+conda create --prefix "${PRENIGHT_VENV}" --yes python=3.14 --quiet
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
 
 echo "activating environment ${PRENIGHT_VENV}"
