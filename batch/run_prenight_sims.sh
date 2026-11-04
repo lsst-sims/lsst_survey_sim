@@ -523,21 +523,32 @@ cd "${WORK_DIR}"
 # involved will be installed with pip.
 
 # loadLSST.sh fails when set -u is on
+echo "Running: source /sdf/group/rubin/sw/w_latest/loadLSST.sh"
 set +u
+set +x
 source /sdf/group/rubin/sw/w_latest/loadLSST.sh
+set -x
 set -u
 
 PRENIGHT_VENV=$(mktemp -d "${PRENIGHT_VENV_ROOT}/prenight-${WORK_DATE}-XXXXXX")
-conda create --prefix "${PRENIGHT_VENV}" --yes python=3.13 --quiet
+echo "Running: conda create --prefix "${PRENIGHT_VENV}" --yes python=3.14 --quiet"
+set +x
+conda create --prefix "${PRENIGHT_VENV}" --yes python=3.14 --quiet
+set -x
 ln -s "${PRENIGHT_VENV}" "${WORK_DIR}/venv"
 
-echo "activating environment ${PRENIGHT_VENV}"
+echo "Running: conda activate ${PRENIGHT_VENV}"
 set +u
+set +x
 conda activate "${PRENIGHT_VENV}"
+set -x
 set -u
 
 # proj not available from pip
+echo "Running: conda install proj --yes --quiet"
+set +x
 conda install proj --yes --quiet
+set -x
 
 # If not set in the constants block above, set
 # LSST_SURVEY_SIM_REFERENCE to the semantic
