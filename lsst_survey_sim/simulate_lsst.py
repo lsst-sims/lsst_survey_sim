@@ -17,6 +17,7 @@ import pandas as pd
 import rubin_nights.dayobs_utils as rn_dayobs
 import rubin_nights.lfa_data as rn_lfa
 import rubin_nights.rubin_sim_addons as rn_sim
+import yaml
 from astroplan import Observer
 from astropy.time import Time, TimeDelta
 from rubin_nights import augment_visits, connections
@@ -44,7 +45,9 @@ LOGGER = logging.getLogger(__name__)
 __all__ = [
     "SCIENCE_PROGRAMS",
     "get_endpoints",
+    "get_summit_versions",
     "get_config_repo",
+    "parse_config_yaml",
     "fetch_previous_visits",
     "fetch_too_events",
     "setup_scheduler",
@@ -71,7 +74,13 @@ SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-4
 
 
 @functools.cache
-def get_endpoints(tokenfile: str | None = None, site: str = "usdf") -> dict:
+def _get_endpoints(tokenfile: str | None, site: str) -> dict:
+    # Cache connection endpoints
+    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    return endpoints
+
+
+def get_endpoints(tokenfile: str | None = None, site: str = "usdf", force_refresh=False) -> dict:
     """Generate and cache connections to some data services -
     see `rubin_nights.connections.get_clients`.
 
@@ -84,35 +93,132 @@ def get_endpoints(tokenfile: str | None = None, site: str = "usdf") -> dict:
     site
         The site (`usdf`, `usdf-dev`, `summit` ..) location at
         which to query services. Must match tokenfile origin.
+    force_refresh
+        If True, force a refresh of the cached endpoints.
 
     Returns
     -------
     endpoints : `dict`
         The cached endpoints to data services.
     """
-    # Cache connection endpoints
-    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
-    return endpoints
+    if force_refresh:
+        _get_endpoints.cache_clear()
+    return _get_endpoints(tokenfile, site)
 
 
-def get_config_repo(ts_config_scheduler_commit: str, clone_path: str = "ts_config_scheduler") -> None:
-    """Git checkout ts_config_scheduler and set it to the desired commit.
-
-    `ts_config_scheduler_commit` is fetchable from
-    `lsst.sal.Scheduler.logevent_configurationApplied`.
-    For most uses, it's also reasonable to just use `develop`.
+def get_summit_versions(day_obs: int, tokenfile: str | None = None, site: str = "usdf") -> dict:
+    """Get the versions of the LSST software on Summit, deployed at the
+    start of dayobs.
 
     Parameters
     ----------
-    ts_config_scheduler_commit : `str`
-        Git branch .. could be a hash?
-    clone_path : `str` or None
+    day_obs
+        The day_obs (YYYYMMDD). Get the versions at the start of the day_obs.
+    tokenfile
+        Path to the RSP tokenfile.
+        See also `rubin_nights.connections.get_access_token`.
+        Default None will use `ACCESS_TOKEN` environment variable.
+    site
+        The site (`usdf`, `usdf-dev`, `summit` ..) location at
+        which to query services. Must match tokenfile origin.
+
+    Notes
+    -----
+    The endpoints are cached between different usages in the same
+    process. Call `get_endpoints` with `force_refresh=True` to force
+    a new setup of the endpoint connections.
+    """
+    # configuration information
+    endpoints = get_endpoints(tokenfile=tokenfile, site=site)
+    sunset, sunrise = rn_dayobs.day_obs_sunset_sunrise(day_obs, sun_alt=-12)
+
+    q = endpoints["efd"].select_top_n(
+        "lsst.sal.Scheduler.logevent_configurationApplied",
+        ["configurations", "salIndex", "private_origin", "url", "version"],
+        1,
+        time_cut=sunset,
+        index=1,
+    )
+    q2 = endpoints["efd"].select_time_series(
+        "lsst.sal.Scheduler.logevent_configurationApplied",
+        ["configurations", "salIndex", "private_origin", "url", "version"],
+        sunset,
+        sunrise,
+        index=1,
+    )
+    q = pd.concat([q, q2])
+
+    def strip_repo(x: pd.Series):
+        return x.url.split("/")[-3]
+
+    def strip_yaml_root(x: pd.Series):
+        return "/".join(x.url.split("/")[-2:])
+
+    def strip_version(x: pd.Series):
+        return x.version.replace("heads/", "")
+
+    def strip_yaml(x: pd.Series):
+        return x.configurations.split(",")[-1]
+
+    config_repo = q.apply(strip_repo, axis=1)
+    config_version = q.apply(strip_version, axis=1)
+    config_yaml_root = q.apply(strip_yaml_root, axis=1)
+    config_yaml = q.apply(strip_yaml, axis=1)
+
+    configs = pd.DataFrame(
+        [config_repo, config_version, config_yaml_root, config_yaml],
+        columns=q.index,
+        index=["config_repo", "config_commit", "config_yaml_root", "config_yaml"],
+    ).T
+
+    q = endpoints["efd"].select_top_n(
+        "lsst.sal.Scheduler.logevent_dependenciesVersions",
+        ["scheduler", "downtimeModel"],
+        1,
+        time_cut=sunset,
+        index=1,
+    )
+    q2 = endpoints["efd"].select_time_series(
+        "lsst.sal.Scheduler.logevent_dependenciesVersions",
+        ["scheduler", "downtimeModel"],
+        sunset,
+        sunrise,
+        index=1,
+    )
+    q = pd.concat([q, q2])
+
+    fbs_version = q["downtimeModel"].iloc[-1]
+
+    return {
+        "fbs_version": fbs_version,
+        "config_repo": config_repo.iloc[-1],
+        "config_version": config_version.iloc[-1],
+        "config_yaml_root": config_yaml_root.iloc[-1],
+        "config_yaml": config_yaml.iloc[-1],
+        "config_df": configs,
+    }
+
+
+def get_config_repo(
+    ts_config_scheduler_commit: str,
+    clone_path: str = "ts_config_scheduler",
+) -> None:
+    """Git clone/checkout ts_config_scheduler and set it to the desired commit.
+
+    Parameters
+    ----------
+    ts_config_scheduler_commit
+        Git branch .. could be a hash.
+    clone_path
         The location to clone the repo.
         Join with the remainder of the path to the configuration scripts.
 
-    Returns
-    -------
-    No return value; this creates or modifies the github repo in `clone_path`.
+
+    Notes
+    -----
+    The commit in use at the summit for `ts_config_scheduler_commit` can
+    be returned in `config_version` from `get_summit_versions`.
+    For most uses, it's also reasonable to just use `develop`.
     """
     repo_url = "https://github.com/lsst-ts/ts_config_scheduler"
 
@@ -128,6 +234,68 @@ def get_config_repo(ts_config_scheduler_commit: str, clone_path: str = "ts_confi
     # Check out the commit
     repo.git.checkout(ts_config_scheduler_commit)
     LOGGER.info(f"Checked out commit {ts_config_scheduler_commit} in {clone_path}.")
+
+
+def parse_config_yaml(
+    clone_path, config_yaml_root: str = "Scheduler/v9", config_yaml: str = "fbs_config_lsst_survey.yaml"
+) -> dict:
+    """Find the config_script_path and the corresponding
+    config_ddf_script_path for the current version of ts_config_scheduler.
+
+    Parameters
+    ----------
+    clone_path
+        The location to clone the repo.
+        Join with the remainder of the path to the configuration scripts.
+    config_yaml_root
+        The path from clone_path to the root of the yaml configuration files.
+    config_yaml
+        The name of the yaml configuration file.
+
+    Returns
+    -------
+    config_script_path, config_ddf_script_path : `str`, `str`
+        The FBS configuration file and the DDF configuration script.
+        If `fbs` and `lsst` are not in the discovered configuration script,
+        a backup of `fbs_config_lsst_survey.py` will be used instead.
+    """
+
+    # Find configuration files:
+    with open(os.path.join(clone_path, config_yaml_root, config_yaml), "r") as file:
+        data = yaml.safe_load(file)
+    # Parse out the actual configuration file in use
+    summit_config_path = data["maintel"]["feature_scheduler_driver_configuration"]["scheduler_config"]
+    config_path = summit_config_path.split("ts_config_scheduler")
+    # But only accept it if 'fbs' and 'lsst' are part of the name.
+    if "fbs" in config_path and "lsst" in config_path:
+        config_script_path = os.path.join(clone_path, config_path)
+    else:
+        # There are other configs that can be in use
+        # but we are not likely to be interested in simulating those.
+        # Fall back:
+        config_script_path = os.path.join(
+            clone_path, "Scheduler/feature_scheduler/maintel/", "fbs_config_lsst_survey.py"
+        )
+
+    # Now try to set the DDF config path, if desired.
+    # This is used to generate the pre-computed DDF observations,
+    # if not already present.
+    # The value can be safely set to None, if the precomputed observations
+    # (a file like `ts_ddf_array_<hash>.npz`)
+    # appropriate for this configuration exists in `RUBIN_SIM_DATA_DIR`.
+    config_ddf_script_path = None
+    with open(config_script_path, "r") as file:
+        for line in file:
+            if "science_program = " in line:
+                # This has to hope that the FBS configuration and DDF scripts
+                # follow these conventions for naming and capitalization.
+                program = line.strip().replace("science_program = ", "")
+                program = program.replace("BLOCK-", "block_")
+                program = program.replace('"', "")
+                config_ddf_script_path = os.path.join(
+                    clone_path, "Scheduler/ddf_gen", f"lsst_ddf_gen_{program}.py"
+                )
+    return {"config_script_path": config_script_path, "config_ddf_script_path": config_ddf_script_path}
 
 
 def fetch_previous_visits(
@@ -218,6 +386,7 @@ def fetch_too_events(t_start: Time, t_end: Time, site: str = "base") -> list[Tar
 
     For success, this requires access to `base`.
     (i.e. summit VPN or running on base-lsp.lsst.codes).
+    TODO - Angelo is/has? added lsst.scimma to usdf too, check and upate.
 
     Parameters
     ----------
@@ -480,7 +649,13 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-06-09": ["u", "g", "r", "i", "z"],
         "2026-10-18": ["g", "r", "i", "z", "y"],
         "2026-10-27": ["u", "g", "r", "i", "z"],
-        "2026-11-17": ["g", "r", "i", "z", "y"],
+        "2026-11-17": [
+            "g",
+            "r",
+            "i",
+            "z",
+        ],
+        "2026-11-18": ["g", "r", "i", "z", "y"],
         "2026-12-01": ["u", "g", "r", "i", "z"],
         "2026-12-15": ["g", "r", "i", "z", "y"],
         "2026-12-29": ["u", "g", "r", "i", "z"],
@@ -684,8 +859,6 @@ def update_scheduler_start(
     """
     # This is intended for updating the scheduler to the current time
     # with the currently obtained observations WITHIN AN ONGOING NIGHT.
-    # (for bulk updates to the start of the night for long-term simulations,
-    # see `restore_scheduler` in rubin_scheduler).
 
     # Determine what *time* we should try to start the simulation.
 
