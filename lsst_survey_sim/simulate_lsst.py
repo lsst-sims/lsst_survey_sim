@@ -335,8 +335,7 @@ def setup_scheduler(
         reading from disk. These should be *opsim* formatted visits.
         If not None, this will ignore all other kwargs.
     opsim_filename
-        Get previous visits from a file, instead of directly from
-        the ConsDB. If set, then consdb will not be queried.
+        Get previous visits from a file, instead of using initial_opsim.
 
     Returns
     -------
@@ -392,6 +391,12 @@ def setup_scheduler(
     # Convert opsim visits to ObservationArray and feed the scheduler.
     if initial_opsim is not None and len(initial_opsim) > 0:
         q = initial_opsim.query("observationStartMJD <= @day_obs_time.mjd")
+        if len(q) == 0:
+            # If we have now excluded all visits, then don't try to add.
+            LOGGER.warning(
+                f"No visits in initial_opsim before {day_obs_time.mjd}. Skipping add to scheduler."
+            )
+            return scheduler, initial_opsim, nside
         sch_obs = SchemaConverter().opsimdf2obs(q)
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
