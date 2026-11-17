@@ -1189,7 +1189,7 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     with open(scheduler_fname, "wb") as sched_io:
         pickle.dump(scheduler, sched_io)
 
-    return 0
+    return config_paths["config_script_path"]
 
 
 def make_auxtel_scheduler_cli(cli_args: list = []) -> int:

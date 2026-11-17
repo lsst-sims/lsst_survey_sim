@@ -429,17 +429,6 @@ require_commands \
 # Scheduler configuration
 ##############################################################################
 
-# Get the scheduler configuration script.
-# It lives in ts_config_scheduler.
-echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
-git clone --depth 1 "${SCHED_CONFIG_REPO_BASE}"
-cd ts_config_scheduler
-git fetch --depth 1 origin "${TS_CONFIG_SCHEDULER_REFERENCE}"
-git checkout FETCH_HEAD
-
-# Get the URL for archiving
-SCHED_CONFIG_HASH=$(git rev-parse HEAD)
-SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
 
 cd "${WORK_DIR}"
 
@@ -461,8 +450,13 @@ fetch_lsst_visits completed_visits.db 20000101 ~/.lsst/usdf_access_token
 grant_group_access completed_visits.db
 
 log "Creating scheduler pickle"
-make_auxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db
+RELATIVE_SCHED_CONFIG_FNAME=$(make_aauxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db)
 grant_group_access scheduler.p
+
+# Get the URL for archiving
+SCHED_CONFIG_HASH=$(git rev-parse HEAD)
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
+
 
 log "Creating model observatory"
 ideal_model_observatory scheduler.p observatory.p

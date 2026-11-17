@@ -601,18 +601,6 @@ require_commands \
 # Scheduler configuration
 ##############################################################################
 
-# Get the scheduler configuration script.
-# It lives in ts_config_scheduler.
-echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
-git clone --depth 1 "${SCHED_CONFIG_REPO_BASE}"
-cd ts_config_scheduler
-git fetch --depth 1 origin "${TS_CONFIG_SCHEDULER_REFERENCE}"
-git checkout FETCH_HEAD
-
-# Get the URL for archiving
-SCHED_CONFIG_HASH=$(git rev-parse HEAD)
-SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
-
 cd "${WORK_DIR}"
 
 ##############################################################################
@@ -652,9 +640,14 @@ fi
 ##############################################################################
 
 log "Creating scheduler pickle"
-make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db
+RELATIVE_SCHED_CONFIG_FNAME=$(make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db)
 #make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token  --opsim completed_visits.db --config_version "${TS_CONFIG_SCHEDULER_REFERENCE}"
 grant_group_access scheduler.p
+
+# Get the URL for archiving
+SCHED_CONFIG_HASH=$(git rev-parse HEAD)
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
+
 
 log "Creating model observatory"
 # Use the seeing value from line 2 of table 9 of LPM-017
