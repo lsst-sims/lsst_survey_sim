@@ -457,11 +457,11 @@ export CONDA_ENV_HASH=$(vseqarchive record-conda-env)
 # Get an empty set of completed visits so we have something
 # to pass make_lsst_scheduler (auxtel sims start from scratch).
 log "Fetching placeholder completed visits"
-fetch_lsst_visits 20000101 completed_visits.db ~/.lsst/usdf_access_token
+fetch_lsst_visits completed_visits.db 20000101 ~/.lsst/usdf_access_token
 grant_group_access completed_visits.db
 
 log "Creating scheduler pickle"
-make_lsst_scheduler scheduler.p --opsim completed_visits.db --config_script "${SCHED_CONFIG_FNAME}" --config_ddf_script ""
+make_auxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db
 grant_group_access scheduler.p
 
 log "Creating model observatory"

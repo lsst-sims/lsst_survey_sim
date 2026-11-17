@@ -63,10 +63,10 @@ __all__ = [
     "run_lsst_sim_cli",
 ]
 
-CONFIG_SCRIPT_PATH = "ts_config_scheduler/Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
-"""Default path to default LSST survey configuration.
-"""
-CONFIG_DDF_SCRIPT_PATH = "ts_config_scheduler/Scheduler/ddf_gen/lsst_ddf_gen_block_407.py"
+CONFIG_SCRIPT_BACKUP = {
+    "maintel": "Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py",
+    "auxtel": "Scheduler/feature_scheduler/auxtel/fbs_spec_flex_survey.py",
+}
 
 SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-419", "BLOCK-421", "BLOCK-430"]
 """Science_program values to include for the default LSST survey visits.
@@ -106,7 +106,9 @@ def get_endpoints(tokenfile: str | None = None, site: str = "usdf", force_refres
     return _get_endpoints(tokenfile, site)
 
 
-def get_summit_versions(day_obs: int, tokenfile: str | None = None, site: str = "usdf") -> dict:
+def get_summit_versions(
+    day_obs: int, tokenfile: str | None = None, site: str = "usdf", telescope: str = "simonyi"
+) -> dict:
     """Get the versions of the LSST software on Summit, deployed at the
     start of dayobs.
 
@@ -121,6 +123,9 @@ def get_summit_versions(day_obs: int, tokenfile: str | None = None, site: str = 
     site
         The site (`usdf`, `usdf-dev`, `summit` ..) location at
         which to query services. Must match tokenfile origin.
+    telescope
+        Which telescope to check for versions.
+        simonyi maps to ScriptQueue 1, auxtel to ScriptQueue 2.
 
     Notes
     -----
@@ -132,19 +137,24 @@ def get_summit_versions(day_obs: int, tokenfile: str | None = None, site: str = 
     endpoints = get_endpoints(tokenfile=tokenfile, site=site)
     sunset, sunrise = rn_dayobs.day_obs_sunset_sunrise(day_obs, sun_alt=-12)
 
+    if "aux" in telescope.lower():
+        queue_index = 2
+    else:
+        queue_index = 1
+
     q = endpoints["efd"].select_top_n(
         "lsst.sal.Scheduler.logevent_configurationApplied",
         ["configurations", "salIndex", "private_origin", "url", "version"],
         1,
         time_cut=sunset,
-        index=1,
+        index=queue_index,
     )
     q2 = endpoints["efd"].select_time_series(
         "lsst.sal.Scheduler.logevent_configurationApplied",
         ["configurations", "salIndex", "private_origin", "url", "version"],
         sunset,
         sunrise,
-        index=1,
+        index=queue_index,
     )
     q = pd.concat([q, q2])
 
@@ -176,14 +186,14 @@ def get_summit_versions(day_obs: int, tokenfile: str | None = None, site: str = 
         ["scheduler", "downtimeModel"],
         1,
         time_cut=sunset,
-        index=1,
+        index=queue_index,
     )
     q2 = endpoints["efd"].select_time_series(
         "lsst.sal.Scheduler.logevent_dependenciesVersions",
         ["scheduler", "downtimeModel"],
         sunset,
         sunrise,
-        index=1,
+        index=queue_index,
     )
     q = pd.concat([q, q2])
 
@@ -237,7 +247,10 @@ def get_config_repo(
 
 
 def parse_config_yaml(
-    clone_path, config_yaml_root: str = "Scheduler/v9", config_yaml: str = "fbs_config_lsst_survey.yaml"
+    clone_path,
+    config_yaml_root: str = "Scheduler/v9",
+    config_yaml: str = "fbs_config_lsst_survey.yaml",
+    telescope: str = "simonyi",
 ) -> dict:
     """Find the config_script_path and the corresponding
     config_ddf_script_path for the current version of ts_config_scheduler.
@@ -256,26 +269,28 @@ def parse_config_yaml(
     -------
     config_script_path, config_ddf_script_path : `str`, `str`
         The FBS configuration file and the DDF configuration script.
-        If `fbs` and `lsst` are not in the discovered configuration script,
-        a backup of `fbs_config_lsst_survey.py` will be used instead.
+        If `fbs` is  not in the discovered configuration script,
+        CONFIG_SCRIPT_BACKUP will be used instead.
     """
 
     # Find configuration files:
     with open(os.path.join(clone_path, config_yaml_root, config_yaml), "r") as file:
         data = yaml.safe_load(file)
     # Parse out the actual configuration file in use
-    summit_config_path = data["maintel"]["feature_scheduler_driver_configuration"]["scheduler_config"]
+    if "aux" in telescope.lower():
+        queue = "auxtel"
+    else:
+        queue = "maintel"
+    summit_config_path = data[queue]["feature_scheduler_driver_configuration"]["scheduler_config"]
     config_path = summit_config_path.split("ts_config_scheduler")
     # But only accept it if 'fbs' and 'lsst' are part of the name.
-    if "fbs" in config_path and "lsst" in config_path:
+    if "fbs" in config_path:
         config_script_path = os.path.join(clone_path, config_path)
     else:
         # There are other configs that can be in use
         # but we are not likely to be interested in simulating those.
         # Fall back:
-        config_script_path = os.path.join(
-            clone_path, "Scheduler/feature_scheduler/maintel/", "fbs_config_lsst_survey.py"
-        )
+        config_script_path = os.path.join(clone_path, CONFIG_SCRIPT_BACKUP[queue])
 
     # Now try to set the DDF config path, if desired.
     # This is used to generate the pre-computed DDF observations,
@@ -284,17 +299,18 @@ def parse_config_yaml(
     # (a file like `ts_ddf_array_<hash>.npz`)
     # appropriate for this configuration exists in `RUBIN_SIM_DATA_DIR`.
     config_ddf_script_path = None
-    with open(config_script_path, "r") as file:
-        for line in file:
-            if "science_program = " in line:
-                # This has to hope that the FBS configuration and DDF scripts
-                # follow these conventions for naming and capitalization.
-                program = line.strip().replace("science_program = ", "")
-                program = program.replace("BLOCK-", "block_")
-                program = program.replace('"', "")
-                config_ddf_script_path = os.path.join(
-                    clone_path, "Scheduler/ddf_gen", f"lsst_ddf_gen_{program}.py"
-                )
+    if queue != "auxtel":
+        with open(config_script_path, "r") as file:
+            for line in file:
+                if "science_program = " in line:
+                    # This has to hope that the FBS config and DDF scripts
+                    # follow these conventions for naming and capitalization.
+                    program = line.strip().replace("science_program = ", "")
+                    program = program.replace("BLOCK-", "block_")
+                    program = program.replace('"', "")
+                    config_ddf_script_path = os.path.join(
+                        clone_path, "Scheduler/ddf_gen", f"lsst_ddf_gen_{program}.py"
+                    )
     return {"config_script_path": config_script_path, "config_ddf_script_path": config_ddf_script_path}
 
 
@@ -1135,8 +1151,9 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
         default="ts_config_scheduler",
         help="Clone the configuration repo here.",
     )
-    parser.add_argument("--config_version", type=str, default="",
-                        help="Use a specific version of the configuration repo.")
+    parser.add_argument(
+        "--config_version", type=str, default="", help="Use a specific version of the configuration repo."
+    )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
     opsim_fname = args.opsim
@@ -1157,6 +1174,63 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
         clone_path=args.clone_path,
         config_yaml_root=versions["config_yaml_root"],
         config_yaml=versions["config_yaml"],
+    )
+
+    scheduler, initial_opsim, nside = setup_scheduler(
+        config_script_path=config_paths["config_script_path"],
+        config_ddf_script_path=config_paths["config_ddf_script_path"],
+        day_obs=day_obs,
+        opsim_filename=opsim_fname,
+    )
+
+    print("NSIDE: ", nside)
+
+    # Save to a pickle
+    with open(scheduler_fname, "wb") as sched_io:
+        pickle.dump(scheduler, sched_io)
+
+    return 0
+
+
+def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
+    parser = argparse.ArgumentParser(description="Create a pickle of an LSST AuxTel scheduler")
+    parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
+    parser.add_argument("day_obs", type=str, help="day_obs to query")
+    parser.add_argument("token_file", type=str, help="files with USDF access token")
+    parser.add_argument(
+        "--site", type=str, default="usdf", help="site of consdb to query (usdf, usdf-dev, or summit)"
+    )
+    parser.add_argument("--opsim", type=str, default="", help="Name of opsim visits file to load.")
+    parser.add_argument(
+        "--clone_path",
+        type=str,
+        default="ts_config_scheduler",
+        help="Clone the configuration repo here.",
+    )
+    parser.add_argument(
+        "--config_version", type=str, default="", help="Use a specific version of the configuration repo."
+    )
+    args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
+
+    opsim_fname = args.opsim
+    if len(opsim_fname) == 0:
+        opsim_fname = None
+    scheduler_fname = args.file_name
+
+    # Find what version of ts_config_scheduler was in use
+    # (note we already hard-code rubin_scheduler and ts_fbs_utils)
+    versions = get_summit_versions(args.day_obs, tokenfile=args.tokenfile, site=args.site, telescope="auxtel")
+    checkout_version = versions["ts_config_scheduler"]
+    if args.config_version != "":
+        checkout_version = args.config_version
+    # Clone ts_config_scheduler
+    get_config_repo(ts_config_scheduler_commit=checkout_version, clone_path=args.clone_path)
+    # And find the configuration script paths
+    config_paths = parse_config_yaml(
+        clone_path=args.clone_path,
+        config_yaml_root=versions["config_yaml_root"],
+        config_yaml=versions["config_yaml"],
+        config_script_backup="Scheduler/feature_scheduler/auxtel/fbs_spec_flex_survey.py ",
     )
 
     scheduler, initial_opsim, nside = setup_scheduler(
