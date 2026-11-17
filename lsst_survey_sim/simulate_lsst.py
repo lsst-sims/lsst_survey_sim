@@ -1098,8 +1098,8 @@ def summit_database_cli(cli_args: list = []) -> int:
 
 def fetch_lsst_visits_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Query the consdb for completed LSST visits")
-    parser.add_argument("day_obs", type=int, help="Day_obs before which to query.")
     parser.add_argument("file_name", type=str, help="Name of opsim db file to write.")
+    parser.add_argument("day_obs", type=int, help="Day_obs before which to query.")
     parser.add_argument("token_file", type=str, help="files with USDF access token")
     parser.add_argument(
         "--site", type=str, default="usdf", help="site of consdb to query (usdf, usdf-dev, or summit)"
@@ -1108,10 +1108,8 @@ def fetch_lsst_visits_cli(cli_args: list = []) -> int:
 
     day_obs = args.day_obs
     file_name = args.file_name
-    token_file = args.token_file
-    site = args.site
 
-    visits = fetch_previous_visits(day_obs, token_file, site=site, fetch_with_tap=False)
+    visits = fetch_previous_visits(day_obs, tokenfile=args.token_file, site=args.site, fetch_with_tap=False)
     if visits is None:
         # Make an empty pd.DataFrame with opsim column names and types.
         visits = SchemaConverter().obs2opsim(ObservationArray()[0:0])
@@ -1125,37 +1123,46 @@ def fetch_lsst_visits_cli(cli_args: list = []) -> int:
 def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Create a pickle of an LSST scheduler")
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
+    parser.add_argument("day_obs", type=str, help="day_obs to query")
+    parser.add_argument("token_file", type=str, help="files with USDF access token")
+    parser.add_argument(
+        "--site", type=str, default="usdf", help="site of consdb to query (usdf, usdf-dev, or summit)"
+    )
     parser.add_argument("--opsim", type=str, default="", help="Name of opsim visits file to load.")
     parser.add_argument(
-        "--config_script",
+        "--clone_path",
         type=str,
-        default=CONFIG_SCRIPT_PATH,
-        help="Path to the config script for the scheduler.",
+        default="ts_config_scheduler",
+        help="Clone the configuration repo here.",
     )
-    parser.add_argument(
-        "--config_ddf_script",
-        type=str,
-        default="",
-        help="Path to the config script for the DDF observations for this scheduler config.",
-    )
+    parser.add_argument("--config_version", type=str, default="",
+                        help="Use a specific version of the configuration repo.")
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
+
     opsim_fname = args.opsim
     if len(opsim_fname) == 0:
         opsim_fname = None
     scheduler_fname = args.file_name
-    scheduler_config_script = args.config_script
-    scheduler_ddf_config_script = args.config_ddf_script
 
-    # The argparse argument of config_ddf_script cannot
-    # be set to None on the command line, so use
-    # the empty string as a sentinel value.
-    if len(scheduler_ddf_config_script) == 0:
-        scheduler_ddf_config_script = None
+    # Find what version of ts_config_scheduler was in use
+    # (note we already hard-code rubin_scheduler and ts_fbs_utils)
+    versions = get_summit_versions(args.day_obs, tokenfile=args.tokenfile, site=args.site)
+    checkout_version = versions["ts_config_scheduler"]
+    if args.config_version != "":
+        checkout_version = args.config_version
+    # Clone ts_config_scheduler
+    get_config_repo(ts_config_scheduler_commit=checkout_version, clone_path=args.clone_path)
+    # And find the configuration script paths
+    config_paths = parse_config_yaml(
+        clone_path=args.clone_path,
+        config_yaml_root=versions["config_yaml_root"],
+        config_yaml=versions["config_yaml"],
+    )
 
     scheduler, initial_opsim, nside = setup_scheduler(
-        config_script_path=scheduler_config_script,
-        config_ddf_script_path=scheduler_ddf_config_script,
-        day_obs=None,
+        config_script_path=config_paths["config_script_path"],
+        config_ddf_script_path=config_paths["config_ddf_script_path"],
+        day_obs=day_obs,
         opsim_filename=opsim_fname,
     )
 
@@ -1171,7 +1178,11 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
 def make_model_observatory_cli(cli_args: list = []) -> int:
     parser = argparse.ArgumentParser(description="Create a pickle of a model observatory")
     parser.add_argument("file_name", type=str, help="Name of pickle file to write.")
-    parser.add_argument("--day_obs", type=int, default=None, help="day_obs for simulation start")
+    parser.add_argument("day_obs", type=str, help="day_obs for simulation start")
+    parser.add_argument("token_file", type=str, help="files with USDF access token")
+    parser.add_argument(
+        "--site", type=str, default="usdf", help="site of consdb to query (usdf, usdf-dev, or summit)"
+    )
     parser.add_argument("--nside", type=int, default=32, help="nside for the model observatory")
     parser.add_argument(
         "--include-downtime",
@@ -1184,11 +1195,6 @@ def make_model_observatory_cli(cli_args: list = []) -> int:
     )
     args = parser.parse_args() if len(cli_args) == 0 else parser.parse_args(cli_args)
 
-    if args.day_obs == 0 or args.day_obs is None:
-        day_obs = rn_dayobs.day_obs_str_to_int(rn_dayobs.today_day_obs())
-    else:
-        day_obs = args.day_obs
-
     observatory_fname = args.file_name
     nside = args.nside
     if args.include_downtime:
@@ -1198,12 +1204,14 @@ def make_model_observatory_cli(cli_args: list = []) -> int:
     seeing = None if args.seeing == 0 else args.seeing
 
     observatory, survey_info = setup_observatory(
-        day_obs=day_obs,
+        day_obs=args.day_obs,
         nside=nside,
         add_downtime=add_downtime,
         add_clouds=False,
         seeing=seeing,
         real_downtime=False,
+        tokenfile=args.token_file,
+        site=args.site,
     )
 
     # Save to a pickle
@@ -1228,7 +1236,7 @@ def make_band_scheduler_cli(cli_args: list = []) -> int:
 
 
 def run_lsst_sim_cli(cli_args: list = []) -> int:
-    parser = argparse.ArgumentParser(description="Run an SV simulation.")
+    parser = argparse.ArgumentParser(description="Run a simulation.")
     parser.add_argument("scheduler", type=str, help="scheduler pickle file.")
     parser.add_argument("observatory", type=str, help="model observatory pickle file.")
     parser.add_argument(

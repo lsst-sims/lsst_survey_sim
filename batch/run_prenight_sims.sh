@@ -630,7 +630,7 @@ export CONDA_ENV_HASH=$(vseqarchive record-conda-env)
 ##############################################################################
 
 log "Fetching completed visits"
-fetch_lsst_visits "${DAYOBS}" completed_visits.db ~/.lsst/usdf_access_token
+fetch_lsst_visits completed_visits.db "${DAYOBS}" ~/.lsst/usdf_access_token
 grant_group_access completed_visits.db
 
 # Record hash of fetched visits
@@ -652,12 +652,13 @@ fi
 ##############################################################################
 
 log "Creating scheduler pickle"
-make_lsst_scheduler scheduler.p --opsim completed_visits.db --config_script "${SCHED_CONFIG_FNAME}"
+make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db
+#make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token  --opsim completed_visits.db --config_version "${TS_CONFIG_SCHEDULER_REFERENCE}"
 grant_group_access scheduler.p
 
 log "Creating model observatory"
 # Use the seeing value from line 2 of table 9 of LPM-017
-make_model_observatory observatory.p --seeing 0.6
+make_model_observatory observatory.p "${DAYOBS}" ~/.lsst/usdf_access_token  --seeing 0.6
 grant_group_access observatory.p
 
 log "Creating the band scheduler"
@@ -724,7 +725,7 @@ rm -f observatory.p
 # Run a simulation with good seeing.
 # Use the value from line 1 of table 9 of LPM-017:
 # an observatory with zenith 500nm seeing of 0.44.
-make_model_observatory observatory_seeing044.p --seeing 0.44
+make_model_observatory observatory_seeing044.p "${DAYOBS}" ~/.lsst/usdf_access_token --seeing 0.44
 grant_group_access observatory_seeing044.p
 
 run_and_archive_sim observatory_seeing044.p \
@@ -739,7 +740,7 @@ rm -f observatory_seeing044.p
 # Run a simulation with poor seeing.
 # Make it high enough that the template tier is never triggered:
 # an observatory with zenith 500nm seeing of 1.3.
-make_model_observatory observatory_seeing130.p --seeing 1.3
+make_model_observatory observatory_seeing130.p "${DAYOBS}" ~/.lsst/usdf_access_token --seeing 1.3
 grant_group_access observatory_seeing130.p
 
 run_and_archive_sim observatory_seeing130.p \
