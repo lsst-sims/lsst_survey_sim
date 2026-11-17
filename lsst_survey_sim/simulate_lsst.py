@@ -1179,7 +1179,7 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     scheduler, initial_opsim, nside = setup_scheduler(
         config_script_path=config_paths["config_script_path"],
         config_ddf_script_path=config_paths["config_ddf_script_path"],
-        day_obs=day_obs,
+        day_obs=args.day_obs,
         opsim_filename=opsim_fname,
     )
 
@@ -1236,7 +1236,7 @@ def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
     scheduler, initial_opsim, nside = setup_scheduler(
         config_script_path=config_paths["config_script_path"],
         config_ddf_script_path=config_paths["config_ddf_script_path"],
-        day_obs=day_obs,
+        day_obs=args.day_obs,
         opsim_filename=opsim_fname,
     )
 
