@@ -1163,7 +1163,7 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
 
     # Find what version of ts_config_scheduler was in use
     # (note we already hard-code rubin_scheduler and ts_fbs_utils)
-    versions = get_summit_versions(args.day_obs, tokenfile=args.tokenfile, site=args.site)
+    versions = get_summit_versions(args.day_obs, tokenfile=args.token_file, site=args.site)
     checkout_version = versions["config_version"]
     if args.config_version != "":
         checkout_version = args.config_version
@@ -1219,7 +1219,9 @@ def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
 
     # Find what version of ts_config_scheduler was in use
     # (note we already hard-code rubin_scheduler and ts_fbs_utils)
-    versions = get_summit_versions(args.day_obs, tokenfile=args.tokenfile, site=args.site, telescope="auxtel")
+    versions = get_summit_versions(
+        args.day_obs, tokenfile=args.token_file, site=args.site, telescope="auxtel"
+    )
     checkout_version = versions["config_version"]
     if args.config_version != "":
         checkout_version = args.config_version
