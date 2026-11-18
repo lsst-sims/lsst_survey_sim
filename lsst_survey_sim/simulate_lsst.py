@@ -1164,7 +1164,7 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
     # Find what version of ts_config_scheduler was in use
     # (note we already hard-code rubin_scheduler and ts_fbs_utils)
     versions = get_summit_versions(args.day_obs, tokenfile=args.tokenfile, site=args.site)
-    checkout_version = versions["ts_config_scheduler"]
+    checkout_version = versions["config_version"]
     if args.config_version != "":
         checkout_version = args.config_version
     # Clone ts_config_scheduler
@@ -1220,7 +1220,7 @@ def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
     # Find what version of ts_config_scheduler was in use
     # (note we already hard-code rubin_scheduler and ts_fbs_utils)
     versions = get_summit_versions(args.day_obs, tokenfile=args.tokenfile, site=args.site, telescope="auxtel")
-    checkout_version = versions["ts_config_scheduler"]
+    checkout_version = versions["config_version"]
     if args.config_version != "":
         checkout_version = args.config_version
     # Clone ts_config_scheduler
@@ -1246,7 +1246,7 @@ def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
     with open(scheduler_fname, "wb") as sched_io:
         pickle.dump(scheduler, sched_io)
 
-    return 0
+    return config_paths["config_script_path"]
 
 
 def make_model_observatory_cli(cli_args: list = []) -> int:
