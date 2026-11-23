@@ -32,6 +32,12 @@ def temp_cwd() -> Iterator:
 
 class TestCLI(unittest.TestCase):
 
+    def setUp(self):
+        self.tokenfile = "token.dat"
+        # Use SURVEY_START_MJD so we get skybrightness files by default.
+        t_start = Time(SURVEY_START_MJD, format="mjd")
+        self.day_obs = str(rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(t_start)))
+
     @unittest.skip("need vcr")
     def test_summit_database_cli(self) -> None:
         with temp_cwd():
@@ -55,8 +61,11 @@ class TestCLI(unittest.TestCase):
             simulate_lsst.get_config_repo(
                 ts_config_scheduler_commit="develop", clone_path="ts_config_scheduler"
             )
-            return_status = simulate_lsst.make_lsst_scheduler_cli([scheduler_pickle])
-            assert return_status == 0
+
+            config_path = simulate_lsst.make_lsst_scheduler_cli(
+                [scheduler_pickle, self.day_obs, self.tokenfile]
+            )
+            assert len(config_path) > 0
 
             with open(scheduler_pickle, "rb") as pickle_io:
                 scheduler = pickle.load(pickle_io)
@@ -67,7 +76,9 @@ class TestCLI(unittest.TestCase):
     def test_make_model_observatory_cli(self) -> None:
         with temp_cwd():
             observatory_pickle = "observatory.p"
-            return_status = simulate_lsst.make_model_observatory_cli([observatory_pickle])
+            return_status = simulate_lsst.make_model_observatory_cli(
+                [observatory_pickle, self.day_obs, self.tokenfile]
+            )
             assert return_status == 0
 
             with open(observatory_pickle, "rb") as pickle_io:
@@ -93,11 +104,16 @@ class TestCLI(unittest.TestCase):
             simulate_lsst.get_config_repo(
                 ts_config_scheduler_commit="develop", clone_path="ts_config_scheduler"
             )
+            config_paths = simulate_lsst.parse_config_yaml(clone_path="ts_config_scheduler")
             # Generate the DDF array here, so we can just pass simple
             # command line arguments next ..
-            _ = subprocess.run(simulate_lsst.CONFIG_DDF_SCRIPT_PATH, capture_output=True)
-            return_status = simulate_lsst.make_lsst_scheduler_cli([scheduler_pickle])
-            assert return_status == 0
+            _ = subprocess.run(config_paths["config_ddf_script_path"], capture_output=True)
+
+            config_py = simulate_lsst.make_lsst_scheduler_cli(
+                [scheduler_pickle, self.day_obs, self.tokenfile]
+            )
+            assert len(config_py) > 0
+
             with open(scheduler_pickle, "rb") as pickle_io:
                 scheduler = pickle.load(pickle_io)
             assert isinstance(scheduler, CoreScheduler)
@@ -105,7 +121,7 @@ class TestCLI(unittest.TestCase):
 
             observatory_pickle = "observatory.p"
             return_status = simulate_lsst.make_model_observatory_cli(
-                [observatory_pickle, "--nside", f"{nside}"]
+                [observatory_pickle, self.day_obs, self.tokenfile, "--nside", f"{nside}"]
             )
             assert return_status == 0
             with open(observatory_pickle, "rb") as pickle_io:
@@ -113,9 +129,7 @@ class TestCLI(unittest.TestCase):
             assert isinstance(observatory, ModelObservatory)
 
             init_opsim = ""
-            # Use SURVEY_START_MJD so we get skybrightness files by default.
-            t_start = Time(SURVEY_START_MJD, format="mjd")
-            day_obs = str(rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(t_start)))
+            day_obs = self.day_obs
             sim_nights = "1"
             run_name = "test_opsim_output"
             simulate_lsst.run_lsst_sim_cli(
