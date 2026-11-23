@@ -62,10 +62,10 @@ class TestCLI(unittest.TestCase):
                 ts_config_scheduler_commit="develop", clone_path="ts_config_scheduler"
             )
 
-            config_path = simulate_lsst.make_lsst_scheduler_cli(
+            return_status = simulate_lsst.make_lsst_scheduler_cli(
                 [scheduler_pickle, self.day_obs, self.tokenfile]
             )
-            assert len(config_path) > 0
+            assert return_status == 0
 
             with open(scheduler_pickle, "rb") as pickle_io:
                 scheduler = pickle.load(pickle_io)
@@ -109,10 +109,10 @@ class TestCLI(unittest.TestCase):
             # command line arguments next ..
             _ = subprocess.run(config_paths["config_ddf_script_path"], capture_output=True)
 
-            config_py = simulate_lsst.make_lsst_scheduler_cli(
+            return_status = simulate_lsst.make_lsst_scheduler_cli(
                 [scheduler_pickle, self.day_obs, self.tokenfile]
             )
-            assert len(config_py) > 0
+            assert return_status == 0
 
             with open(scheduler_pickle, "rb") as pickle_io:
                 scheduler = pickle.load(pickle_io)

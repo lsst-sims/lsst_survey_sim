@@ -1183,13 +1183,12 @@ def make_lsst_scheduler_cli(cli_args: list = []) -> int:
         opsim_filename=opsim_fname,
     )
 
-    print("NSIDE: ", nside)
-
     # Save to a pickle
     with open(scheduler_fname, "wb") as sched_io:
         pickle.dump(scheduler, sched_io)
 
-    return config_paths["config_script_path"]
+    print("SCHEDULER_CONFIG: ", config_paths["config_script_path"])
+    return 0
 
 
 def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
@@ -1242,13 +1241,12 @@ def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
         opsim_filename=opsim_fname,
     )
 
-    print("NSIDE: ", nside)
-
     # Save to a pickle
     with open(scheduler_fname, "wb") as sched_io:
         pickle.dump(scheduler, sched_io)
 
-    return config_paths["config_script_path"]
+    print("SCHEDULER_CONFIG: ", config_paths["config_script_path"])
+    return 0
 
 
 def make_model_observatory_cli(cli_args: list = []) -> int:
