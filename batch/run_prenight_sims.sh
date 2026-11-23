@@ -638,7 +638,7 @@ fi
 ##############################################################################
 
 log "Creating scheduler pickle"
-RELATIVE_SCHED_CONFIG_FNAME=$(make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db)
+RELATIVE_SCHED_CONFIG_FNAME=$(make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db | awk '/SCHEDULER_CONFIG/ {print $2}')
 #make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token  --opsim completed_visits.db --config_version "${TS_CONFIG_SCHEDULER_REFERENCE}"
 grant_group_access scheduler.p
 
