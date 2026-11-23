@@ -91,8 +91,6 @@ readonly SIM_NIGHTS=3
 readonly TS_CONFIG_SCHEDULER_REFERENCE="develop"
 readonly SCHEDULER_GROUP_USERS="lynnej neilsen yoachim"
 readonly SCHED_CONFIG_REPO_BASE="https://github.com/lsst-ts/ts_config_scheduler"
-readonly RELATIVE_SCHED_CONFIG_FNAME="Scheduler/feature_scheduler/auxtel/fbs_spec_flex_survey.py"
-readonly SCHED_CONFIG_FNAME="ts_config_scheduler/${RELATIVE_SCHED_CONFIG_FNAME}"
 readonly ARCHIVE="s3://rubin:rubin-scheduler-prenight/opsim/vseq/"
 
 readonly PRENIGHT_WORK_ROOT="/sdf/data/rubin/shared/scheduler/prenight/work/run_auxtel_prenight_sims"
@@ -454,9 +452,8 @@ RELATIVE_SCHED_CONFIG_FNAME=$(make_aauxtel_scheduler scheduler.p "${DAYOBS}" ~/.
 grant_group_access scheduler.p
 
 # Get the URL for archiving
-SCHED_CONFIG_HASH=$(git rev-parse HEAD)
+SCHED_CONFIG_HASH=$(git -C ts_config_scheduler rev-parse HEAD)
 SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
-
 
 log "Creating model observatory"
 ideal_model_observatory scheduler.p observatory.p
