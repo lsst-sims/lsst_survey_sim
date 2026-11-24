@@ -82,6 +82,7 @@ export LASTNIGHTISO="$(date -u --date="${DAYOBS} -1 day" +'%F')"
 # Constants
 ##############################################################################
 
+#LSST_SURVEY_SIM_REFERENCE="tickets/LSST-88"
 LSST_SURVEY_SIM_REFERENCE="main"
 
 readonly SASQUATCH_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
@@ -644,7 +645,7 @@ grant_group_access scheduler.p
 
 # Get the URL for archiving
 SCHED_CONFIG_HASH=$(git -C ts_config_scheduler rev-parse HEAD)
-SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME#ts_config_scheduler/}"
 
 
 log "Creating model observatory"
