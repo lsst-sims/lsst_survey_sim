@@ -448,7 +448,7 @@ fetch_lsst_visits completed_visits.db 20000101 ~/.lsst/usdf_access_token
 grant_group_access completed_visits.db
 
 log "Creating scheduler pickle"
-RELATIVE_SCHED_CONFIG_FNAME=$(make_aauxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db)
+RELATIVE_SCHED_CONFIG_FNAME=$(make_auxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db | awk '/SCHEDULER_CONFIG/ {print $2}')
 grant_group_access scheduler.p
 
 # Get the URL for archiving
