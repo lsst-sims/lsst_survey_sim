@@ -20,8 +20,11 @@ import rubin_nights.rubin_sim_addons as rn_sim
 import yaml
 from astroplan import Observer
 from astropy.time import Time, TimeDelta
+from httpx2 import HTTPStatusError
 from rubin_nights import augment_visits, connections
+from rubin_nights.consdb_query import ConsDbFastAPI, ConsDbTap
 from rubin_nights.influx_query import InfluxQueryClient
+from rubin_nights.reference_values import API_ENDPOINTS
 from rubin_scheduler.scheduler import sim_runner
 from rubin_scheduler.scheduler.features import Conditions
 from rubin_scheduler.scheduler.model_observatory import ModelObservatory
@@ -75,8 +78,28 @@ SCIENCE_PROGRAMS = ["BLOCK-407", "BLOCK-408", "BLOCK-416", "BLOCK-417", "BLOCK-4
 
 @functools.cache
 def _get_endpoints(tokenfile: str | None, site: str) -> dict:
-    # Cache connection endpoints
-    endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    consdb_only = False
+    try:
+        # Cache connection endpoints
+        endpoints = connections.get_clients(tokenfile=tokenfile, site=site)
+    except HTTPStatusError:
+        # This means contact with repertoire didn't work.
+        consdb_only = True
+        LOGGER.exception("Could not contact repertoire for EFD creds.")
+    except ValueError:
+        # This means something happened but might be just usdf-dev.
+        consdb_only = True
+        LOGGER.exception("Other error with getting influx db creds.")
+    if consdb_only:
+        # Ok, we couldn't get EFD credentials.
+        # Just set up consdb only.
+        endpoints = {}
+        endpoints["consdb"] = ConsDbFastAPI(
+            API_ENDPOINTS[site], auth_token=connections.get_access_token(tokenfile)
+        )
+        endpoints["consdb_tap"] = ConsDbTap(
+            API_ENDPOINTS[site], auth_token=connections.get_access_token(tokenfile)
+        )
     return endpoints
 
 
@@ -137,6 +160,23 @@ def get_summit_versions(
     endpoints = get_endpoints(tokenfile=tokenfile, site=site)
     sunset, sunrise = rn_dayobs.day_obs_sunset_sunrise(day_obs, sun_alt=-12)
 
+    # Bail and just use develop if could not contact EFD.
+    if "efd" not in endpoints:
+        LOGGER.warning("Could not contact EFD, fallback to `develop`.")
+        if telescope.lower() == "auxtel":
+            config_yaml = "auxtel_fbs_spec_flex_survey.yaml"
+        else:
+            config_yaml = "fbs_config_lsst_survey.yaml"
+        return {
+            "fbs_version": "unknown",
+            "config_repo": "ts_config_scheduler",
+            "config_version": "develop",
+            "config_yaml_root": "Scheduler/v10",
+            "config_yaml": config_yaml,
+            "config_df": pd.DataFrame([]),
+        }
+
+    # Now assume efd available.
     if "aux" in telescope.lower():
         queue_index = 2
     else:
@@ -248,7 +288,7 @@ def get_config_repo(
 
 def parse_config_yaml(
     clone_path,
-    config_yaml_root: str = "Scheduler/v9",
+    config_yaml_root: str = "Scheduler/v10",
     config_yaml: str = "fbs_config_lsst_survey.yaml",
     telescope: str = "simonyi",
 ) -> dict:
@@ -665,13 +705,7 @@ def setup_band_scheduler() -> DateSwapBandScheduler:
         "2026-06-09": ["u", "g", "r", "i", "z"],
         "2026-10-18": ["g", "r", "i", "z", "y"],
         "2026-10-27": ["u", "g", "r", "i", "z"],
-        "2026-11-17": [
-            "g",
-            "r",
-            "i",
-            "z",
-        ],
-        "2026-11-18": ["g", "r", "i", "z", "y"],
+        "2026-11-17": ["g", "r", "i", "z", "y"],
         "2026-12-01": ["u", "g", "r", "i", "z"],
         "2026-12-15": ["g", "r", "i", "z", "y"],
         "2026-12-29": ["u", "g", "r", "i", "z"],
@@ -817,7 +851,7 @@ def setup_observatory(
             cloud_offset_year=cloud_offset_year,
             too_server=too_server,
             time_setup=rn_dayobs.day_obs_to_time(day_obs),
-            efd_client=get_endpoints(tokenfile=tokenfile, site=site)["efd"],
+            efd_client=get_endpoints(tokenfile=tokenfile, site=site).get("efd", None),
         )
         LOGGER.info("Set up summit observatory.")
 
