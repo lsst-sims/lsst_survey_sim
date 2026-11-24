@@ -1265,7 +1265,7 @@ def make_auxtel_scheduler_cli(cli_args: list = []) -> int:
         clone_path=args.clone_path,
         config_yaml_root=versions["config_yaml_root"],
         config_yaml=versions["config_yaml"],
-        config_script_backup="Scheduler/feature_scheduler/auxtel/fbs_spec_flex_survey.py ",
+        telescope="auxtel"
     )
 
     scheduler, initial_opsim, nside = setup_scheduler(
