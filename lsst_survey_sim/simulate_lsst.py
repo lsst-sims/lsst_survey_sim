@@ -199,15 +199,21 @@ def get_summit_versions(
     q = pd.concat([q, q2])
 
     def strip_repo(x: pd.Series):
+        # Pull out the repo name (ts_config_scheduler expected currently).
         return x.url.split("/")[-3]
 
     def strip_yaml_root(x: pd.Series):
-        return "/".join(x.url.split("/")[-2:])
+        # Pull out the directory for the yaml configuration.
+        # This will be something like Scheduler/v10.
+        # Ensure it looks like a relative path (lstrip /).
+        return "/".join(x.url.split("/")[-2:]).lstrip("/")
 
     def strip_version(x: pd.Series):
+        # Pull out the deployed version tag.
         return x.version.replace("heads/", "")
 
     def strip_yaml(x: pd.Series):
+        # Pull out the name of the yaml configuration file.
         return x.configurations.split(",")[-1]
 
     config_repo = q.apply(strip_repo, axis=1)
@@ -298,7 +304,7 @@ def parse_config_yaml(
     Parameters
     ----------
     clone_path
-        The location to clone the repo.
+        The directory containing the ts_config_scheduler (or equivalent) repo.
         Join with the remainder of the path to the configuration scripts.
     config_yaml_root
         The path from clone_path to the root of the yaml configuration files.
@@ -323,6 +329,8 @@ def parse_config_yaml(
         queue = "maintel"
     summit_config_path = data[queue]["feature_scheduler_driver_configuration"]["scheduler_config"]
     config_path = summit_config_path.split("ts_config_scheduler")[-1]
+    # Ensure this looks like a relative path after the split.
+    config_path = config_path.lstrip("/")
     # But only accept it if 'fbs' is part of the name.
     if "fbs" in config_path:
         config_script_path = os.path.join(clone_path, config_path)
