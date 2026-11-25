@@ -8,7 +8,7 @@ matplotlib-base
 numpy
 pandas
 psycopg2
-rubin-nights >=0.12.0
-rubin-scheduler =4.6.0
-rubin-sim >=2.6.1
+rubin-nights >=0.19.0
+rubin-scheduler =4.6.1
+rubin-sim >=2.8.0
 
