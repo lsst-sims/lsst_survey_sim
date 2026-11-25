@@ -5,6 +5,7 @@ import subprocess
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pandas as pd
@@ -33,7 +34,8 @@ def temp_cwd() -> Iterator:
 class TestCLI(unittest.TestCase):
 
     def setUp(self):
-        self.tokenfile = "token.dat"
+        self.test_dir = Path(__file__).parent
+        self.tokenfile = os.path.join(self.test_dir, "data", "dummy_token")
         # Use SURVEY_START_MJD so we get skybrightness files by default.
         t_start = Time(SURVEY_START_MJD, format="mjd")
         self.day_obs = str(rn_dayobs.day_obs_str_to_int(rn_dayobs.time_to_day_obs(t_start)))
