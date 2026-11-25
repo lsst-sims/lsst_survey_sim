@@ -79,6 +79,7 @@ export DAYOBS_SIMULATED="${DAYOBS} ${NEXT_DAYOBS} ${LAST_DAYOBS}"
 # Constants
 ##############################################################################
 
+#LSST_SURVEY_SIM_REFERENCE="tickets/LSST-88"
 LSST_SURVEY_SIM_REFERENCE="main"
 
 readonly SASQUATCH_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
@@ -448,12 +449,12 @@ fetch_lsst_visits completed_visits.db 20000101 ~/.lsst/usdf_access_token
 grant_group_access completed_visits.db
 
 log "Creating scheduler pickle"
-RELATIVE_SCHED_CONFIG_FNAME=$(make_aauxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db)
+RELATIVE_SCHED_CONFIG_FNAME=$(make_auxtel_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db | awk '/SCHEDULER_CONFIG/ {print $2}')
 grant_group_access scheduler.p
 
 # Get the URL for archiving
 SCHED_CONFIG_HASH=$(git -C ts_config_scheduler rev-parse HEAD)
-SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME#ts_config_scheduler/}"
 
 log "Creating model observatory"
 ideal_model_observatory scheduler.p observatory.p
