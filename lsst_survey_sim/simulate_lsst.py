@@ -322,14 +322,15 @@ def parse_config_yaml(
     else:
         queue = "maintel"
     summit_config_path = data[queue]["feature_scheduler_driver_configuration"]["scheduler_config"]
-    config_path = summit_config_path.split("ts_config_scheduler")
-    # But only accept it if 'fbs' and 'lsst' are part of the name.
+    config_path = summit_config_path.split("ts_config_scheduler")[-1]
+    # But only accept it if 'fbs' is part of the name.
     if "fbs" in config_path:
         config_script_path = os.path.join(clone_path, config_path)
     else:
         # There are other configs that can be in use
         # but we are not likely to be interested in simulating those.
         # Fall back:
+        LOGGER.warning("Fell back  to default configuration value")
         config_script_path = os.path.join(clone_path, CONFIG_SCRIPT_BACKUP[queue])
 
     # Now try to set the DDF config path, if desired.
