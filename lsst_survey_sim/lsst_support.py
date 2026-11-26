@@ -713,7 +713,7 @@ def setup_observatory_summit(
                 f"Setting up summit observatory with altitude_maxspeed {tma_performance['altitude_maxspeed']}"
             )
         except KeyError:
-            LOGGER.info("USDF EFD not accessible. Using default summit-20.")
+            LOGGER.info("EFD not accessible. Using default summit-20.")
             time_setup = None
     # "summit-20 TMA" - but this is a label from the summit, not 20% in all
     else:

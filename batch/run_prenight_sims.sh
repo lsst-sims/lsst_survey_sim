@@ -82,6 +82,7 @@ export LASTNIGHTISO="$(date -u --date="${DAYOBS} -1 day" +'%F')"
 # Constants
 ##############################################################################
 
+#LSST_SURVEY_SIM_REFERENCE="tickets/LSST-88"
 LSST_SURVEY_SIM_REFERENCE="main"
 
 readonly SASQUATCH_URL="https://usdf-rsp-dev.slac.stanford.edu/sasquatch-rest-proxy/topics/lsst.survey"
@@ -94,8 +95,6 @@ readonly SIM_NIGHTS=3
 readonly TS_CONFIG_SCHEDULER_REFERENCE="develop"
 readonly SCHEDULER_GROUP_USERS="lynnej neilsen yoachim"
 readonly SCHED_CONFIG_REPO_BASE="https://github.com/lsst-ts/ts_config_scheduler"
-readonly RELATIVE_SCHED_CONFIG_FNAME="Scheduler/feature_scheduler/maintel/fbs_config_lsst_survey.py"
-readonly SCHED_CONFIG_FNAME="ts_config_scheduler/${RELATIVE_SCHED_CONFIG_FNAME}"
 readonly ARCHIVE="s3://rubin:rubin-scheduler-prenight/opsim/vseq/"
 
 readonly PRENIGHT_WORK_ROOT="/sdf/data/rubin/shared/scheduler/prenight/work/run_prenight_sims"
@@ -601,18 +600,6 @@ require_commands \
 # Scheduler configuration
 ##############################################################################
 
-# Get the scheduler configuration script.
-# It lives in ts_config_scheduler.
-echo "Using ts_config_scheduler ${SCHED_CONFIG_FNAME} from ${TS_CONFIG_SCHEDULER_REFERENCE}"
-git clone --depth 1 "${SCHED_CONFIG_REPO_BASE}"
-cd ts_config_scheduler
-git fetch --depth 1 origin "${TS_CONFIG_SCHEDULER_REFERENCE}"
-git checkout FETCH_HEAD
-
-# Get the URL for archiving
-SCHED_CONFIG_HASH=$(git rev-parse HEAD)
-SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME}"
-
 cd "${WORK_DIR}"
 
 ##############################################################################
@@ -630,7 +617,7 @@ export CONDA_ENV_HASH=$(vseqarchive record-conda-env)
 ##############################################################################
 
 log "Fetching completed visits"
-fetch_lsst_visits "${DAYOBS}" completed_visits.db ~/.lsst/usdf_access_token
+fetch_lsst_visits completed_visits.db "${DAYOBS}" ~/.lsst/usdf_access_token
 grant_group_access completed_visits.db
 
 # Record hash of fetched visits
@@ -652,12 +639,18 @@ fi
 ##############################################################################
 
 log "Creating scheduler pickle"
-make_lsst_scheduler scheduler.p --opsim completed_visits.db --config_script "${SCHED_CONFIG_FNAME}"
+RELATIVE_SCHED_CONFIG_FNAME=$(make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token --opsim completed_visits.db | awk '/SCHEDULER_CONFIG/ {print $2}')
+#make_lsst_scheduler scheduler.p "${DAYOBS}" ~/.lsst/usdf_access_token  --opsim completed_visits.db --config_version "${TS_CONFIG_SCHEDULER_REFERENCE}"
 grant_group_access scheduler.p
+
+# Get the URL for archiving
+SCHED_CONFIG_HASH=$(git -C ts_config_scheduler rev-parse HEAD)
+SCHED_CONFIG_URL="${SCHED_CONFIG_REPO_BASE}/blob/${SCHED_CONFIG_HASH}/${RELATIVE_SCHED_CONFIG_FNAME#ts_config_scheduler/}"
+
 
 log "Creating model observatory"
 # Use the seeing value from line 2 of table 9 of LPM-017
-make_model_observatory observatory.p --seeing 0.6
+make_model_observatory observatory.p "${DAYOBS}" ~/.lsst/usdf_access_token  --seeing 0.6
 grant_group_access observatory.p
 
 log "Creating the band scheduler"
@@ -724,7 +717,7 @@ rm -f observatory.p
 # Run a simulation with good seeing.
 # Use the value from line 1 of table 9 of LPM-017:
 # an observatory with zenith 500nm seeing of 0.44.
-make_model_observatory observatory_seeing044.p --seeing 0.44
+make_model_observatory observatory_seeing044.p "${DAYOBS}" ~/.lsst/usdf_access_token --seeing 0.44
 grant_group_access observatory_seeing044.p
 
 run_and_archive_sim observatory_seeing044.p \
@@ -739,7 +732,7 @@ rm -f observatory_seeing044.p
 # Run a simulation with poor seeing.
 # Make it high enough that the template tier is never triggered:
 # an observatory with zenith 500nm seeing of 1.3.
-make_model_observatory observatory_seeing130.p --seeing 1.3
+make_model_observatory observatory_seeing130.p "${DAYOBS}" ~/.lsst/usdf_access_token --seeing 1.3
 grant_group_access observatory_seeing130.p
 
 run_and_archive_sim observatory_seeing130.p \
